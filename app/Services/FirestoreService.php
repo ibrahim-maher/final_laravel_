@@ -110,8 +110,8 @@ class FirestoreService
     public function create(array $data, string $documentId = null): ?array
     {
         try {
-            $data['created_at'] = ['stringValue' => now()->toDateTimeString()];
-            $data['updated_at'] = ['stringValue' => now()->toDateTimeString()];
+            $data['created_at'] = now()->toDateTimeString();
+            $data['updated_at'] = now()->toDateTimeString();
             
             // Convert data to Firestore format
             $firestoreData = $this->convertToFirestoreFormat($data);
@@ -161,7 +161,7 @@ class FirestoreService
                 $data = $this->convertFromFirestoreFormat($result['fields'] ?? []);
                 $data['id'] = $documentId;
                 
-                Log::debug("Document found in '{$this->collection}' with ID: {$documentId}");
+                Log::debug("Document found in '{$this->collection}' with ID: {$documentId}", ['data' => $data]);
                 return $data;
             }
 
@@ -201,6 +201,9 @@ class FirestoreService
                         $data = $this->convertFromFirestoreFormat($doc['fields'] ?? []);
                         $data['id'] = basename($doc['name']);
                         $documents[] = $data;
+                        
+                        // Debug log each document
+                        Log::debug("Document converted", ['id' => $data['id'], 'data' => $data]);
                     }
                 }
 
@@ -223,7 +226,7 @@ class FirestoreService
     public function update(string $documentId, array $data): bool
     {
         try {
-            $data['updated_at'] = ['stringValue' => now()->toDateTimeString()];
+            $data['updated_at'] = now()->toDateTimeString();
             
             $firestoreData = $this->convertToFirestoreFormat($data);
             $url = "{$this->baseUrl}/{$this->collection}/{$documentId}";
@@ -347,14 +350,16 @@ class FirestoreService
     }
 
     /**
-     * Convert PHP array to Firestore format
+     * Convert PHP array to Firestore format - ENHANCED VERSION
      */
     private function convertToFirestoreFormat(array $data): array
     {
         $converted = [];
         
         foreach ($data as $key => $value) {
-            if (is_string($value)) {
+            if (is_null($value)) {
+                $converted[$key] = ['nullValue' => null];
+            } elseif (is_string($value)) {
                 $converted[$key] = ['stringValue' => $value];
             } elseif (is_int($value)) {
                 $converted[$key] = ['integerValue' => (string) $value];
@@ -363,9 +368,21 @@ class FirestoreService
             } elseif (is_bool($value)) {
                 $converted[$key] = ['booleanValue' => $value];
             } elseif (is_array($value)) {
-                // For arrays, we'll convert them to maps for simplicity
-                $converted[$key] = ['mapValue' => ['fields' => $this->convertToFirestoreFormat($value)]];
+                // Handle indexed arrays as arrayValue
+                if (array_keys($value) === range(0, count($value) - 1)) {
+                    $arrayValues = [];
+                    foreach ($value as $item) {
+                        $arrayValues[] = $this->convertSingleValueToFirestore($item);
+                    }
+                    $converted[$key] = ['arrayValue' => ['values' => $arrayValues]];
+                } else {
+                    // Handle associative arrays as mapValue
+                    $converted[$key] = ['mapValue' => ['fields' => $this->convertToFirestoreFormat($value)]];
+                }
+            } elseif ($value instanceof \DateTime || $value instanceof \DateTimeInterface) {
+                $converted[$key] = ['timestampValue' => $value->format('Y-m-d\TH:i:s\Z')];
             } else {
+                // Fallback to string
                 $converted[$key] = ['stringValue' => (string) $value];
             }
         }
@@ -374,14 +391,38 @@ class FirestoreService
     }
 
     /**
-     * Convert Firestore format to PHP array
+     * Convert single value to Firestore format
+     */
+    private function convertSingleValueToFirestore($value): array
+    {
+        if (is_null($value)) {
+            return ['nullValue' => null];
+        } elseif (is_string($value)) {
+            return ['stringValue' => $value];
+        } elseif (is_int($value)) {
+            return ['integerValue' => (string) $value];
+        } elseif (is_float($value)) {
+            return ['doubleValue' => $value];
+        } elseif (is_bool($value)) {
+            return ['booleanValue' => $value];
+        } elseif (is_array($value)) {
+            return ['mapValue' => ['fields' => $this->convertToFirestoreFormat($value)]];
+        } else {
+            return ['stringValue' => (string) $value];
+        }
+    }
+
+    /**
+     * Convert Firestore format to PHP array - ENHANCED VERSION
      */
     private function convertFromFirestoreFormat(array $fields): array
     {
         $converted = [];
         
         foreach ($fields as $key => $value) {
-            if (isset($value['stringValue'])) {
+            if (isset($value['nullValue'])) {
+                $converted[$key] = null;
+            } elseif (isset($value['stringValue'])) {
                 $converted[$key] = $value['stringValue'];
             } elseif (isset($value['integerValue'])) {
                 $converted[$key] = (int) $value['integerValue'];
@@ -389,13 +430,51 @@ class FirestoreService
                 $converted[$key] = $value['doubleValue'];
             } elseif (isset($value['booleanValue'])) {
                 $converted[$key] = $value['booleanValue'];
+            } elseif (isset($value['timestampValue'])) {
+                $converted[$key] = $value['timestampValue'];
+            } elseif (isset($value['arrayValue']['values'])) {
+                $array = [];
+                foreach ($value['arrayValue']['values'] as $item) {
+                    $array[] = $this->convertSingleValueFromFirestore($item);
+                }
+                $converted[$key] = $array;
             } elseif (isset($value['mapValue']['fields'])) {
                 $converted[$key] = $this->convertFromFirestoreFormat($value['mapValue']['fields']);
+            } elseif (isset($value['geoPointValue'])) {
+                $converted[$key] = $value['geoPointValue'];
+            } elseif (isset($value['referenceValue'])) {
+                $converted[$key] = $value['referenceValue'];
             } else {
+                // Log unknown value types for debugging
+                Log::warning("Unknown Firestore value type", ['key' => $key, 'value' => $value]);
                 $converted[$key] = null;
             }
         }
         
         return $converted;
+    }
+
+    /**
+     * Convert single Firestore value to PHP value
+     */
+    private function convertSingleValueFromFirestore(array $value)
+    {
+        if (isset($value['nullValue'])) {
+            return null;
+        } elseif (isset($value['stringValue'])) {
+            return $value['stringValue'];
+        } elseif (isset($value['integerValue'])) {
+            return (int) $value['integerValue'];
+        } elseif (isset($value['doubleValue'])) {
+            return $value['doubleValue'];
+        } elseif (isset($value['booleanValue'])) {
+            return $value['booleanValue'];
+        } elseif (isset($value['timestampValue'])) {
+            return $value['timestampValue'];
+        } elseif (isset($value['mapValue']['fields'])) {
+            return $this->convertFromFirestoreFormat($value['mapValue']['fields']);
+        } else {
+            return null;
+        }
     }
 }

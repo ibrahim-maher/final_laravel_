@@ -2,32 +2,28 @@
 
 namespace App\Modules\Admin\Services;
 
-use App\Models\User;
-
 class AdminService
 {
-    public function getAllUsers()
+    // All user-related functions have been moved to UserService
+    // This service can now focus on admin-specific functionality
+    
+    public function getSystemStats()
     {
-        return User::all();
+        // Admin-specific system statistics
+        return [
+            'admin_users_count' => 0,
+            'system_health' => 'good',
+            'last_backup' => now()->subDays(1)
+        ];
     }
-
-    public function getUserById($id)
+    
+    public function getAdminSettings()
     {
-        return User::find($id);
-    }
-
-    public function deleteUser($id)
-    {
-        return User::destroy($id);
-    }
-
-    public function updateUserStatus($id, $status)
-    {
-        $user = User::find($id);
-        if ($user) {
-            $user->status = $status;
-            return $user->save();
-        }
-        return false;
+        // Admin-specific settings
+        return [
+            'maintenance_mode' => false,
+            'debug_enabled' => false,
+            'backup_frequency' => 'daily'
+        ];
     }
 }

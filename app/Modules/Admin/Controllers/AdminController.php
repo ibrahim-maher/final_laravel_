@@ -68,28 +68,6 @@ class AdminController extends Controller
     }
 
     /**
-     * Admin users management
-     */
-    public function users()
-    {
-        if (!session('firebase_user')) {
-            return redirect()->route('login');
-        }
-
-        Log::info('Admin users page accessed by: ' . session('firebase_user.email'));
-        
-        try {
-            $users = $this->firestoreService->collection('admin_users')->getAll();
-            Log::debug('Successfully retrieved ' . count($users) . ' admin users');
-        } catch (\Exception $e) {
-            Log::error('Error getting admin users: ' . $e->getMessage());
-            $users = [];
-        }
-        
-        return view('admin::users', compact('users'));
-    }
-
-    /**
      * System settings
      */
     public function settings()

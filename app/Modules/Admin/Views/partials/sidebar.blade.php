@@ -25,7 +25,7 @@
             </h3>
             <div class="space-y-1">
                 <a href="{{ route('admin.dashboard') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.dashboard') ? 'bg-gradient-to-r from-primary to-secondary text-white shadow-lg' : '' }}">
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.dashboard') ? 'bg-white/20 text-white' : '' }}">
                     <i class="fas fa-tachometer-alt w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
                     <span>Dashboard</span>
                     @if(request()->routeIs('admin.dashboard'))
@@ -47,16 +47,48 @@
                 <i class="fas fa-users mr-2"></i>User Management
             </h3>
             <div class="space-y-1">
-                <a href="{{ route('admin.users') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.users') ? 'bg-gradient-to-r from-primary to-secondary text-white shadow-lg' : '' }}">
+                <a href="{{ route('user.index') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('user.index') ? 'bg-white/20 text-white' : '' }}">
                     <i class="fas fa-users w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
                     <span>All Users</span>
                 </a>
                 
-                <a href="#" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group">
+                <a href="{{ route('user.create') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('user.create') ? 'bg-white/20 text-white' : '' }}">
                     <i class="fas fa-user-plus w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
                     <span>Add New User</span>
+                </a>
+                
+                <a href="{{ route('user.profile') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('user.profile') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-user-circle w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>User Profile</span>
+                </a>
+            </div>
+        </div>
+        
+        <!-- Modules Section -->
+        <div class="mb-6">
+            <h3 class="text-xs font-semibold text-blue-200 uppercase tracking-wider mb-3 px-3">
+                <i class="fas fa-cubes mr-2"></i>Modules
+            </h3>
+            <div class="space-y-1">
+                <a href="{{ route('document.index') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('document.*') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-file-alt w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Documents</span>
+                </a>
+                
+                <a href="{{ route('driver.index') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('driver.*') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-car w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Drivers</span>
+                </a>
+                
+                <a href="{{ route('core.settings') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('core.*') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-cogs w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Core Settings</span>
                 </a>
             </div>
         </div>
@@ -68,12 +100,12 @@
             </h3>
             <div class="space-y-1">
                 <a href="{{ route('admin.settings') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.settings') ? 'bg-gradient-to-r from-primary to-secondary text-white shadow-lg' : '' }}">
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.settings') ? 'bg-white/20 text-white' : '' }}">
                     <i class="fas fa-cog w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>Settings</span>
+                    <span>Admin Settings</span>
                 </a>
                 
-                <a href="#" 
+                <a href="{{ route('admin.test-firestore') }}" 
                    class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group">
                     <i class="fas fa-database w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
                     <span>Firebase Console</span>
@@ -88,12 +120,12 @@
             <img src="https://ui-avatars.com/api/?name={{ urlencode(session('firebase_user.email', 'Admin')) }}&size=40&background=FFA500&color=ffffff" 
                  alt="User" class="w-10 h-10 rounded-full border-2 border-secondary/50 group-hover:border-secondary transition-colors duration-200">
             <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-white truncate">{{ session('firebase_user.email', 'Admin User') }}</p>
-                <p class="text-xs text-blue-200 truncate">Administrator</p>
+                <p class="text-sm font-medium text-white truncate">{{ session('firebase_user.email', 'Admin User') }}</p>
+                <p class="text-xs text-blue-200">Administrator</p>
             </div>
-            <form method="POST" action="{{ route('logout') }}">
+            <form method="POST" action="{{ route('logout') }}" class="inline">
                 @csrf
-                <button type="submit" class="text-white/50 hover:text-red-400 transition-colors duration-200">
+                <button type="submit" class="text-white/60 hover:text-white transition-colors duration-200" title="Logout">
                     <i class="fas fa-sign-out-alt"></i>
                 </button>
             </form>
