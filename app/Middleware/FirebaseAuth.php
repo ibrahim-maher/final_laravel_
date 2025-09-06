@@ -6,7 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
-class FirebaseAdmin
+class FirebaseAuth
 {
     /**
      * Handle an incoming request.
@@ -17,9 +17,9 @@ class FirebaseAdmin
      */
     public function handle(Request $request, Closure $next)
     {
-        // First check if user is authenticated
+        // Check if user is authenticated via Firebase
         if (!session('firebase_user')) {
-            Log::warning('Unauthenticated admin access attempt to: ' . $request->url());
+            Log::warning('Unauthenticated access attempt to: ' . $request->url());
             
             if ($request->expectsJson()) {
                 return response()->json(['error' => 'Unauthorized'], 401);
@@ -28,23 +28,21 @@ class FirebaseAdmin
             return redirect()->route('login')->with('error', 'Please log in to continue.');
         }
 
-        // Check if user has admin privileges
+        // Verify the session has required fields
         $firebaseUser = session('firebase_user');
-        if (!isset($firebaseUser['is_admin']) || !$firebaseUser['is_admin']) {
-            Log::warning('Non-admin user attempted to access admin area: ' . $firebaseUser['email']);
+        if (!isset($firebaseUser['uid']) || !isset($firebaseUser['email'])) {
+            Log::warning('Invalid Firebase session data');
+            session()->forget('firebase_user');
             
             if ($request->expectsJson()) {
-                return response()->json(['error' => 'Forbidden - Admin access required'], 403);
+                return response()->json(['error' => 'Invalid session'], 401);
             }
             
-            return redirect()->route('login')->with('error', 'Admin access required.');
+            return redirect()->route('login')->with('error', 'Session expired. Please log in again.');
         }
 
-        // Optional: Check for specific admin roles if you implement them later
-        // $adminRole = $firebaseUser['admin_role'] ?? null;
-        // if (!in_array($adminRole, ['admin', 'super_admin'])) {
-        //     return redirect()->route('login')->with('error', 'Insufficient admin privileges.');
-        // }
+        // Add user data to request for easy access
+        $request->merge(['firebase_user' => $firebaseUser]);
 
         return $next($request);
     }

@@ -2,7 +2,7 @@
 
 namespace App\Modules\User\Services;
 
-use App\Services\FirestoreService;
+use App\Services\UserFirestoreService;
 use Illuminate\Support\Facades\Log;
 
 class UserService
@@ -10,7 +10,7 @@ class UserService
     protected $firestoreService;
     protected $collection = 'users';
 
-    public function __construct(FirestoreService $firestoreService)
+    public function __construct(UserFirestoreService $firestoreService)
     {
         $this->firestoreService = $firestoreService;
     }

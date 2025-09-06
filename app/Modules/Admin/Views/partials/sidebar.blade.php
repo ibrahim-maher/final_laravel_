@@ -25,70 +25,146 @@
             </h3>
             <div class="space-y-1">
                 <a href="{{ route('admin.dashboard') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.dashboard') ? 'bg-white/20 text-white' : '' }}">
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.dashboard*') ? 'bg-white/20 text-white' : '' }}">
                     <i class="fas fa-tachometer-alt w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
                     <span>Dashboard</span>
-                    @if(request()->routeIs('admin.dashboard'))
+                    @if(request()->routeIs('admin.dashboard*'))
                         <div class="ml-auto w-2 h-2 bg-secondary rounded-full animate-pulse"></div>
                     @endif
                 </a>
-                
-                <a href="#" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group">
-                    <i class="fas fa-chart-line w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>Analytics</span>
-                </a>
             </div>
         </div>
         
-        <!-- User Management Section -->
+        <!-- Driver Management Section -->
         <div class="mb-6">
             <h3 class="text-xs font-semibold text-blue-200 uppercase tracking-wider mb-3 px-3">
-                <i class="fas fa-users mr-2"></i>User Management
+                <i class="fas fa-car mr-2"></i>Driver Management
             </h3>
             <div class="space-y-1">
-                <a href="{{ route('user.index') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('user.index') ? 'bg-white/20 text-white' : '' }}">
+                <a href="{{ route('admin.drivers.index') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.drivers.index') ? 'bg-white/20 text-white' : '' }}">
                     <i class="fas fa-users w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>All Users</span>
+                    <span>All Drivers</span>
                 </a>
                 
-                <a href="{{ route('user.create') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('user.create') ? 'bg-white/20 text-white' : '' }}">
+                <a href="{{ route('admin.drivers.create') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.drivers.create') ? 'bg-white/20 text-white' : '' }}">
                     <i class="fas fa-user-plus w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>Add New User</span>
+                    <span>Add New Driver</span>
                 </a>
                 
-                <a href="{{ route('user.profile') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('user.profile') ? 'bg-white/20 text-white' : '' }}">
-                    <i class="fas fa-user-circle w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>User Profile</span>
+                <a href="{{ route('admin.drivers.statistics') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.drivers.statistics') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-chart-bar w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Driver Statistics</span>
                 </a>
             </div>
         </div>
         
-        <!-- Modules Section -->
+        <!-- Vehicle Management Section -->
         <div class="mb-6">
             <h3 class="text-xs font-semibold text-blue-200 uppercase tracking-wider mb-3 px-3">
-                <i class="fas fa-cubes mr-2"></i>Modules
+                <i class="fas fa-car-side mr-2"></i>Vehicle Management
             </h3>
             <div class="space-y-1">
-                <a href="{{ route('document.index') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('document.*') ? 'bg-white/20 text-white' : '' }}">
-                    <i class="fas fa-file-alt w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>Documents</span>
-                </a>
-                
-                <a href="{{ route('driver.index') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('driver.*') ? 'bg-white/20 text-white' : '' }}">
+                <a href="{{ route('admin.vehicles.index') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.vehicles.index') ? 'bg-white/20 text-white' : '' }}">
                     <i class="fas fa-car w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>Drivers</span>
+                    <span>All Vehicles</span>
                 </a>
                 
-                <a href="{{ route('core.settings') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('core.*') ? 'bg-white/20 text-white' : '' }}">
-                    <i class="fas fa-cogs w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>Core Settings</span>
+                <a href="{{ route('admin.vehicles.create') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.vehicles.create') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-plus w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Add New Vehicle</span>
+                </a>
+                
+                <a href="{{ route('admin.vehicles.statistics') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.vehicles.statistics') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-chart-line w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Vehicle Statistics</span>
+                </a>
+            </div>
+        </div>
+        
+        <!-- Document Management Section -->
+        <div class="mb-6">
+            <h3 class="text-xs font-semibold text-blue-200 uppercase tracking-wider mb-3 px-3">
+                <i class="fas fa-file-alt mr-2"></i>Document Management
+            </h3>
+            <div class="space-y-1">
+                <a href="{{ route('admin.documents.index') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.documents.index') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-folder w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>All Documents</span>
+                </a>
+                
+                <a href="{{ route('admin.documents.verification-queue') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.documents.verification-queue') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-shield-check w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Verification Queue</span>
+                    <!-- Add notification badge if needed -->
+                    <span class="ml-auto bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                        <!-- Dynamic count here -->
+                    </span>
+                </a>
+                
+                <a href="{{ route('admin.documents.statistics') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.documents.statistics') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-chart-pie w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Document Statistics</span>
+                </a>
+            </div>
+        </div>
+        
+        <!-- Ride Management Section -->
+        <div class="mb-6">
+            <h3 class="text-xs font-semibold text-blue-200 uppercase tracking-wider mb-3 px-3">
+                <i class="fas fa-route mr-2"></i>Ride Management
+            </h3>
+            <div class="space-y-1">
+                <a href="{{ route('admin.rides.index') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.rides.index') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-map-marked-alt w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>All Rides</span>
+                </a>
+                
+                <a href="{{ route('admin.rides.create') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.rides.create') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-plus-circle w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Create Ride</span>
+                </a>
+                
+                <a href="{{ route('admin.rides.statistics') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.rides.statistics') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-analytics w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Ride Statistics</span>
+                </a>
+            </div>
+        </div>
+        
+        <!-- Activity Management Section -->
+        <div class="mb-6">
+            <h3 class="text-xs font-semibold text-blue-200 uppercase tracking-wider mb-3 px-3">
+                <i class="fas fa-bell mr-2"></i>Activity Management
+            </h3>
+            <div class="space-y-1">
+                <a href="{{ route('admin.activities.index') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.activities.index') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-list w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>All Activities</span>
+                </a>
+                
+                <a href="{{ route('admin.activities.create') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.activities.create') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-plus w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Create Activity</span>
+                </a>
+                
+                <a href="{{ route('admin.activities.statistics') }}" 
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.activities.statistics') ? 'bg-white/20 text-white' : '' }}">
+                    <i class="fas fa-chart-area w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Activity Statistics</span>
                 </a>
             </div>
         </div>
@@ -99,16 +175,18 @@
                 <i class="fas fa-server mr-2"></i>System
             </h3>
             <div class="space-y-1">
-                <a href="{{ route('admin.settings') }}" 
-                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group {{ request()->routeIs('admin.settings') ? 'bg-white/20 text-white' : '' }}">
-                    <i class="fas fa-cog w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>Admin Settings</span>
+                <a href="{{ route('admin.utilities.clear-cache') }}" 
+                   onclick="clearCache(event)"
+                   class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group">
+                    <i class="fas fa-broom w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Clear Cache</span>
                 </a>
                 
-                <a href="{{ route('admin.test-firestore') }}" 
+                <a href="{{ route('admin.utilities.maintenance-mode') }}" 
+                   onclick="toggleMaintenance(event)"
                    class="sidebar-nav-link flex items-center px-4 py-3 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 group">
-                    <i class="fas fa-database w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
-                    <span>Firebase Console</span>
+                    <i class="fas fa-tools w-5 mr-3 group-hover:scale-110 transition-transform duration-200"></i>
+                    <span>Maintenance Mode</span>
                 </a>
             </div>
         </div>
@@ -132,3 +210,63 @@
         </div>
     </div>
 </div>
+
+<script>
+async function clearCache(event) {
+    event.preventDefault();
+    
+    if (!confirm('Are you sure you want to clear the cache?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('{{ route("admin.utilities.clear-cache") }}', {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                'Accept': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.success) {
+            alert('Cache cleared successfully!');
+        } else {
+            alert('Failed to clear cache: ' + (result.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Clear cache error:', error);
+        alert('Error clearing cache: Connection failed');
+    }
+}
+
+async function toggleMaintenance(event) {
+    event.preventDefault();
+    
+    if (!confirm('Are you sure you want to toggle maintenance mode?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('{{ route("admin.utilities.maintenance-mode") }}', {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                'Accept': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.success) {
+            alert(result.message);
+        } else {
+            alert('Failed to toggle maintenance mode: ' + (result.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Maintenance mode error:', error);
+        alert('Error toggling maintenance mode: Connection failed');
+    }
+}
+</script>

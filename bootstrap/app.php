@@ -12,8 +12,12 @@ return Application::configure(basePath: dirname(__DIR__))
     )
    ->withMiddleware(function (Middleware $middleware) {
     $middleware->alias([
-        'admin' => \App\Http\Middleware\AdminMiddleware::class,
-    ]);
+       'firebase.auth' => \App\Http\Middleware\FirebaseAuth::class,
+        'firebase.admin' => \App\Http\Middleware\FirebaseAdmin::class,
+
+        // Alternative short aliases
+        'auth' => \App\Http\Middleware\FirebaseAuth::class,
+        'admin' => \App\Http\Middleware\FirebaseAdmin::class,    ]);
 })
 
     ->withExceptions(function (Exceptions $exceptions): void {
