@@ -1,0 +1,1 @@
+{{-- Admin Foq Dashboard View --}}

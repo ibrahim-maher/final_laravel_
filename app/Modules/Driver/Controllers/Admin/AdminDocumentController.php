@@ -22,8 +22,6 @@ class AdminDocumentController extends Controller
     {
         $this->driverService = $driverService;
         $this->DriverDocumentService = $DriverDocumentService;
-
-   
     }
 
     /**
@@ -43,7 +41,7 @@ class AdminDocumentController extends Controller
             // Get all documents from all drivers
             $allDrivers = $this->driverService->getAllDrivers(['limit' => 1000]);
             $documents = collect();
-            
+
             foreach ($allDrivers as $driver) {
                 $driverDocuments = $this->driverService->getDriverDocuments($driver['firebase_uid']);
                 foreach ($driverDocuments as $document) {
@@ -56,11 +54,11 @@ class AdminDocumentController extends Controller
             // Apply filters
             if (!empty($filters['search'])) {
                 $search = strtolower($filters['search']);
-                $documents = $documents->filter(function($document) use ($search) {
+                $documents = $documents->filter(function ($document) use ($search) {
                     return stripos($document['document_name'] ?? '', $search) !== false ||
-                           stripos($document['document_number'] ?? '', $search) !== false ||
-                           stripos($document['driver_name'] ?? '', $search) !== false ||
-                           stripos($document['issuing_authority'] ?? '', $search) !== false;
+                        stripos($document['document_number'] ?? '', $search) !== false ||
+                        stripos($document['driver_name'] ?? '', $search) !== false ||
+                        stripos($document['issuing_authority'] ?? '', $search) !== false;
                 });
             }
 
@@ -74,13 +72,13 @@ class AdminDocumentController extends Controller
 
             if (!empty($filters['expiry_status'])) {
                 $now = now();
-                $documents = $documents->filter(function($document) use ($filters, $now) {
+                $documents = $documents->filter(function ($document) use ($filters, $now) {
                     if (!isset($document['expiry_date']) || !$document['expiry_date']) {
                         return $filters['expiry_status'] === 'no_expiry';
                     }
-                    
+
                     $expiryDate = \Carbon\Carbon::parse($document['expiry_date']);
-                    
+
                     switch ($filters['expiry_status']) {
                         case 'expired':
                             return $expiryDate->isPast();
@@ -100,19 +98,19 @@ class AdminDocumentController extends Controller
             $documents = $documents->forPage($currentPage, $perPage);
 
             $totalDocuments = $documents->count();
-            
+
             // Get summary statistics
             $pendingDocuments = $this->driverService->getPendingDocuments();
             $expiredDocuments = $this->driverService->getExpiredDocuments();
             $expiringSoonDocuments = $this->driverService->getDocumentsExpiringSoon();
-            
+
             Log::info('Admin document dashboard accessed', [
                 'admin' => session('firebase_user.email'),
                 'filters' => $filters
             ]);
-            
+
             return view('driver::admin.documents.index', compact(
-                'documents', 
+                'documents',
                 'totalDocuments',
                 'pendingDocuments',
                 'expiredDocuments',
@@ -122,7 +120,6 @@ class AdminDocumentController extends Controller
                 'verificationStatuses' => $this->getVerificationStatuses(),
                 'expiryStatuses' => $this->getExpiryStatuses()
             ]);
-            
         } catch (\Exception $e) {
             Log::error('Error loading admin document dashboard: ' . $e->getMessage());
             return redirect()->back()->with('error', 'Error loading document dashboard.');
@@ -136,7 +133,7 @@ class AdminDocumentController extends Controller
     {
         try {
             $document = $this->DriverDocumentService->getDocumentById($documentId);
-            
+
             if (!$document) {
                 return redirect()->route('admin.documents.index')
                     ->with('error', 'Document not found.');
@@ -149,30 +146,29 @@ class AdminDocumentController extends Controller
                 'admin' => session('firebase_user.email'),
                 'document_id' => $documentId
             ]);
-            
+
             return view('driver::admin.documents.show', compact(
                 'document',
                 'driver'
             ));
-            
         } catch (\Exception $e) {
             Log::error('Error loading document details: ' . $e->getMessage());
             return redirect()->route('admin.documents.index')
                 ->with('error', 'Error loading document details.');
         }
     }
-/**
- * Helper: Get expiry statuses
- */
-private function getExpiryStatuses(): array
-{
-    return [
-        'expired' => 'Expired',
-        'expiring_soon' => 'Expiring Soon',
-        'valid' => 'Valid',
-        'no_expiry' => 'No Expiry Date'
-    ];
-}
+    /**
+     * Helper: Get expiry statuses
+     */
+    private function getExpiryStatuses(): array
+    {
+        return [
+            'expired' => 'Expired',
+            'expiring_soon' => 'Expiring Soon',
+            'valid' => 'Valid',
+            'no_expiry' => 'No Expiry Date'
+        ];
+    }
     /**
      * Show form for uploading new document
      */
@@ -180,7 +176,7 @@ private function getExpiryStatuses(): array
     {
         $driverFirebaseUid = $request->get('driver_firebase_uid');
         $driver = null;
-        
+
         if ($driverFirebaseUid) {
             $driver = $this->driverService->getDriverById($driverFirebaseUid);
         }
@@ -239,7 +235,7 @@ private function getExpiryStatuses(): array
                 if ($request->verification_status !== 'pending') {
                     if ($request->verification_status === 'verified') {
                         $this->driverService->verifyDocument(
-                            $result['id'], 
+                            $result['id'],
                             session('firebase_user.uid'),
                             'Verified by admin during upload'
                         );
@@ -257,7 +253,7 @@ private function getExpiryStatuses(): array
                     'document_id' => $result['id'] ?? 'unknown',
                     'driver_id' => $request->driver_firebase_uid
                 ]);
-                
+
                 return redirect()->route('admin.documents.index')
                     ->with('success', 'Document uploaded successfully!');
             } else {
@@ -265,7 +261,6 @@ private function getExpiryStatuses(): array
                     ->with('error', 'Failed to upload document.')
                     ->withInput();
             }
-
         } catch (\Exception $e) {
             Log::error('Error uploading document: ' . $e->getMessage());
             return redirect()->back()
@@ -281,7 +276,7 @@ private function getExpiryStatuses(): array
     {
         try {
             $document = $this->DriverDocumentService->getDocumentById($documentId);
-            
+
             if (!$document) {
                 return redirect()->route('admin.documents.index')
                     ->with('error', 'Document not found.');
@@ -295,7 +290,6 @@ private function getExpiryStatuses(): array
                 'documentTypes' => DriverDocument::getDocumentTypes(),
                 'verificationStatuses' => $this->getVerificationStatuses()
             ]);
-            
         } catch (\Exception $e) {
             Log::error('Error loading document for edit: ' . $e->getMessage());
             return redirect()->route('admin.documents.index')
@@ -367,7 +361,6 @@ private function getExpiryStatuses(): array
                     'message' => 'Failed to verify document'
                 ]);
             }
-
         } catch (\Exception $e) {
             Log::error('Error verifying document: ' . $e->getMessage());
             return response()->json([
@@ -417,7 +410,6 @@ private function getExpiryStatuses(): array
                     'message' => 'Failed to reject document'
                 ]);
             }
-
         } catch (\Exception $e) {
             Log::error('Error rejecting document: ' . $e->getMessage());
             return response()->json([
@@ -434,7 +426,7 @@ private function getExpiryStatuses(): array
     {
         try {
             $document = $this->DriverDocumentService->getDocumentById($documentId);
-            
+
             if (!$document) {
                 return redirect()->route('admin.documents.index')
                     ->with('error', 'Document not found.');
@@ -454,7 +446,6 @@ private function getExpiryStatuses(): array
                 $document['file_path'],
                 $document['file_name'] ?? 'document'
             );
-
         } catch (\Exception $e) {
             Log::error('Error downloading document: ' . $e->getMessage());
             return redirect()->back()
@@ -476,7 +467,7 @@ private function getExpiryStatuses(): array
 
         if ($validator->fails()) {
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Invalid input',
                 'errors' => $validator->errors()
             ], 400);
@@ -485,7 +476,7 @@ private function getExpiryStatuses(): array
         try {
             $action = $request->action;
             $documentIds = $request->document_ids;
-            
+
             $processedCount = 0;
             $failedCount = 0;
 
@@ -520,7 +511,6 @@ private function getExpiryStatuses(): array
                 'processed_count' => $processedCount,
                 'failed_count' => $failedCount
             ]);
-
         } catch (\Exception $e) {
             Log::error('Bulk document action error: ' . $e->getMessage());
             return response()->json([
@@ -549,10 +539,9 @@ private function getExpiryStatuses(): array
 
             return view('driver::admin.documents.verification-queue', compact(
                 'pendingDocuments',
-                'expiredDocuments', 
+                'expiredDocuments',
                 'expiringSoonDocuments'
             ));
-
         } catch (\Exception $e) {
             Log::error('Error loading document verification queue: ' . $e->getMessage());
             return redirect()->route('admin.documents.index')
@@ -567,9 +556,8 @@ private function getExpiryStatuses(): array
     {
         try {
             $statistics = $this->driverService->getSystemAnalytics()['document_statistics'] ?? [];
-            
-            return view('driver::admin.documents.statistics', compact('statistics'));
 
+            return view('driver::admin.documents.statistics', compact('statistics'));
         } catch (\Exception $e) {
             Log::error('Error loading document statistics: ' . $e->getMessage());
             return redirect()->route('admin.documents.index')
@@ -614,11 +602,11 @@ private function getExpiryStatuses(): array
         ][$action];
 
         $message = "Successfully {$actionPast} {$processed} documents";
-        
+
         if ($failed > 0) {
             $message .= " ({$failed} failed)";
         }
-        
+
         return $message . ".";
     }
 
@@ -634,7 +622,7 @@ private function getExpiryStatuses(): array
         ];
     }
 
-   
+
 
     /**
      * Delete document
@@ -643,7 +631,7 @@ private function getExpiryStatuses(): array
     {
         try {
             $document = $this->DriverDocumentService->getDocumentById($documentId);
-            
+
             if (!$document) {
                 return redirect()->route('admin.documents.index')
                     ->with('error', 'Document not found.');
@@ -656,14 +644,13 @@ private function getExpiryStatuses(): array
                     'admin' => session('firebase_user.email'),
                     'document_id' => $documentId
                 ]);
-                
+
                 return redirect()->route('admin.documents.index')
                     ->with('success', 'Document deleted successfully!');
             } else {
                 return redirect()->back()
                     ->with('error', 'Failed to delete document.');
             }
-
         } catch (\Exception $e) {
             Log::error('Error deleting document: ' . $e->getMessage());
             return redirect()->back()
@@ -700,7 +687,7 @@ private function getExpiryStatuses(): array
                     'admin' => session('firebase_user.email'),
                     'document_id' => $documentId
                 ]);
-                
+
                 return response()->json([
                     'success' => true,
                     'message' => 'Document verified successfully!',
@@ -712,7 +699,6 @@ private function getExpiryStatuses(): array
                     'message' => 'Failed to verify document.'
                 ], 400);
             }
-
         } catch (\Exception $e) {
             Log::error('Error verifying document: ' . $e->getMessage());
             return response()->json([

@@ -16,10 +16,7 @@
                     id="refreshBtn">
                 <i class="fas fa-sync mr-2"></i>Refresh
             </button>
-            <a href="{{ route('admin.dashboard.export') }}" 
-               class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
-                <i class="fas fa-download mr-2"></i>Export Data
-            </a>
+          
         </div>
     </div>
 </div>
@@ -295,7 +292,7 @@
             <a href="{{ route('admin.documents.create') }}" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">
                 <i class="fas fa-file-plus mr-3"></i>Upload Document
             </a>
-            <a href="{{ route('admin.vehicles.create') }}" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">
+            <a href="" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">
                 <i class="fas fa-car mr-3"></i>Add Vehicle
             </a>
             <a href="{{ route('admin.rides.create') }}" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">

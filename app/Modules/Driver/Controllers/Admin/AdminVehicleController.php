@@ -6,22 +6,30 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use App\Modules\Driver\Services\DriverService;
 use App\Modules\Driver\Services\DriverVehicleService;
-
+use App\Modules\Driver\Services\DriverService;
+use App\Modules\Driver\Services\DriverDocumentService;
 use App\Modules\Driver\Models\Vehicle;
+use App\Modules\Driver\Models\Driver;
+use App\Modules\Driver\Models\DriverDocument;
 
 class AdminVehicleController extends Controller
 {
+    protected $vehicleService;
     protected $driverService;
-    protected $DriverVehicleService;
+    protected $documentService;
 
-    public function __construct(DriverService $driverService, DriverVehicleService $DriverVehicleService)
-    {
+    public function __construct(
+        DriverVehicleService $vehicleService,
+        DriverService $driverService,
+        DriverDocumentService $documentService
+    ) {
+        $this->vehicleService = $vehicleService;
         $this->driverService = $driverService;
-        $this->DriverVehicleService = $DriverVehicleService;
-     
+        $this->documentService = $documentService;
     }
+
+    // ============ DASHBOARD AND LISTING ============
 
     /**
      * Display vehicle management dashboard
@@ -34,103 +42,110 @@ class AdminVehicleController extends Controller
                 'status' => $request->get('status'),
                 'verification_status' => $request->get('verification_status'),
                 'vehicle_type' => $request->get('vehicle_type'),
-                'limit' => $request->get('limit', 50)
+                'fuel_type' => $request->get('fuel_type'),
+                'driver_id' => $request->get('driver_id'),
+                'limit' => min($request->get('limit', 15), 25)
             ];
 
-            // Get all vehicles from all drivers
-            $allDrivers = $this->driverService->getAllDrivers(['limit' => 1000]);
-            $vehicles = collect();
-            
-            foreach ($allDrivers as $driver) {
-                $driverVehicles = $this->driverService->getDriverVehicles($driver['firebase_uid']);
-                foreach ($driverVehicles as $vehicle) {
-                    $vehicle['driver_name'] = $driver['name'];
-                    $vehicle['driver_email'] = $driver['email'];
-                    $vehicles->push($vehicle);
-                }
-            }
+            // Get vehicles directly without caching for list
+            $vehicles = $this->vehicleService->getAllVehicles($filters);
 
-            // Apply filters
-            if (!empty($filters['search'])) {
-                $search = strtolower($filters['search']);
-                $vehicles = $vehicles->filter(function($vehicle) use ($search) {
-                    return stripos($vehicle['make'] ?? '', $search) !== false ||
-                           stripos($vehicle['model'] ?? '', $search) !== false ||
-                           stripos($vehicle['license_plate'] ?? '', $search) !== false ||
-                           stripos($vehicle['driver_name'] ?? '', $search) !== false;
-                });
-            }
+            // Debug logging
+            Log::info('Vehicles data structure', [
+                'vehicles_type' => gettype($vehicles),
+                'vehicles_class' => get_class($vehicles),
+                'vehicles_count' => method_exists($vehicles, 'count') ? $vehicles->count() : count($vehicles)
+            ]);
 
-            if (!empty($filters['status'])) {
-                $vehicles = $vehicles->where('status', $filters['status']);
-            }
+            // Cache total count for 5 minutes
+            $totalVehicles = cache()->remember('total_vehicles_count', 300, function () {
+                return $this->vehicleService->getTotalVehiclesCount();
+            });
 
-            if (!empty($filters['verification_status'])) {
-                $vehicles = $vehicles->where('verification_status', $filters['verification_status']);
-            }
+            // Cache statistics for 5 minutes
+            $statistics = cache()->remember('vehicle_statistics', 300, function () {
+                return $this->vehicleService->getVehicleStatistics();
+            });
 
-            if (!empty($filters['vehicle_type'])) {
-                $vehicles = $vehicles->where('vehicle_type', $filters['vehicle_type']);
-            }
-
-            // Paginate
-            $currentPage = $request->get('page', 1);
-            $perPage = $filters['limit'];
-            $vehicles = $vehicles->forPage($currentPage, $perPage);
-
-            $totalVehicles = $vehicles->count();
-            
             Log::info('Admin vehicle dashboard accessed', [
                 'admin' => session('firebase_user.email'),
-                'filters' => $filters
+                'filters' => $filters,
+                'result_count' => $vehicles->count(),
+                'total_vehicles' => $totalVehicles
             ]);
-            
+
             return view('driver::admin.vehicles.index', compact(
-                'vehicles', 
-                'totalVehicles'
-            ) + $filters + [
-                'vehicleTypes' => Vehicle::getVehicleTypes(),
-                'fuelTypes' => Vehicle::getFuelTypes(),
-                'statuses' => $this->getVehicleStatuses(),
-                'verificationStatuses' => $this->getVerificationStatuses()
-            ]);
-            
+                'vehicles',
+                'totalVehicles',
+                'statistics'
+            ) + $filters);
         } catch (\Exception $e) {
-            Log::error('Error loading admin vehicle dashboard: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Error loading vehicle dashboard.');
+            Log::error('Error loading admin vehicle dashboard: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return redirect()->back()->with('error', 'Error loading vehicle dashboard: ' . $e->getMessage());
         }
     }
 
     /**
      * Show detailed vehicle information
      */
-    public function show(string $vehicleId)
+    public function show($vehicleId)
     {
         try {
-            $vehicle = $this->DriverVehicleService->getVehicleById($vehicleId);
-            
-            if (!$vehicle) {
+            // Cache vehicle details for 2 minutes
+            $cacheKey = "vehicle_details_{$vehicleId}";
+            $vehicleData = cache()->remember($cacheKey, 120, function () use ($vehicleId) {
+
+                $vehicle = $this->vehicleService->getVehicleById($vehicleId);
+                if (!$vehicle) {
+                    return null;
+                }
+
+                return [
+                    'vehicle' => $vehicle,
+                    'driver' => $this->driverService->getDriverById($vehicle->driver_firebase_uid),
+                    'completionStatus' => $this->vehicleService->getVehicleCompletionStatus($vehicleId)
+                ];
+            });
+
+            if (!$vehicleData || !$vehicleData['vehicle']) {
                 return redirect()->route('admin.vehicles.index')
                     ->with('error', 'Vehicle not found.');
             }
 
-            // Get driver information
-            $driver = $this->driverService->getDriverById($vehicle['driver_firebase_uid']);
-            
-            // Get related rides
-            $rides = $this->driverService->getDriverRides($vehicle['driver_firebase_uid'], ['limit' => 20]);
+            // Load secondary data with longer cache
+            $secondaryData = cache()->remember("vehicle_secondary_{$vehicleId}", 300, function () use ($vehicleId) {
+                return [
+                    'rideStats' => $this->vehicleService->getVehicleRideStatistics($vehicleId),
+                    'performanceMetrics' => $this->vehicleService->getVehiclePerformanceMetrics($vehicleId)
+                ];
+            });
+
+            // Load documents and activities
+            $dynamicData = cache()->remember("vehicle_dynamic_{$vehicleId}", 60, function () use ($vehicleId) {
+                return [
+                    'documents' => $this->vehicleService->getVehicleDocuments($vehicleId),
+                    'activities' => $this->vehicleService->getVehicleActivities($vehicleId, ['limit' => 10]),
+                ];
+            });
+
+            // Load recent rides
+            $recentRides = cache()->remember("vehicle_recent_rides_{$vehicleId}", 180, function () use ($vehicleId) {
+                return $this->vehicleService->getVehicleRides($vehicleId, ['limit' => 5]);
+            });
+
+            // Merge all data
+            $allData = array_merge($vehicleData, $secondaryData, $dynamicData, [
+                'rides' => $recentRides
+            ]);
 
             Log::info('Admin viewed vehicle details', [
                 'admin' => session('firebase_user.email'),
                 'vehicle_id' => $vehicleId
             ]);
-            
-            return view('driver::admin.vehicles.show', compact(
-                'vehicle',
-                'driver',
-                'rides'
-            ));
-            
+
+            return view('driver::admin.vehicles.show', $allData);
         } catch (\Exception $e) {
             Log::error('Error loading vehicle details: ' . $e->getMessage());
             return redirect()->route('admin.vehicles.index')
@@ -138,25 +153,284 @@ class AdminVehicleController extends Controller
         }
     }
 
+    // ============ STATISTICS ============
+
+    /**
+     * Display vehicle statistics dashboard
+     */
+    public function statistics()
+    {
+        try {
+            // Get comprehensive vehicle statistics
+            $stats = cache()->remember('vehicle_detailed_statistics', 300, function () {
+                return $this->vehicleService->getDetailedVehicleStatistics();
+            });
+
+            // Get vehicle distribution by status
+            $statusDistribution = cache()->remember('vehicle_status_distribution', 300, function () {
+                return $this->vehicleService->getVehicleStatusDistribution();
+            });
+
+            // Get vehicle distribution by type
+            $typeDistribution = cache()->remember('vehicle_type_distribution', 300, function () {
+                return $this->vehicleService->getVehicleTypeDistribution();
+            });
+
+            // Get monthly vehicle registrations
+            $monthlyRegistrations = cache()->remember('vehicle_monthly_registrations', 300, function () {
+                return $this->vehicleService->getMonthlyVehicleRegistrations(12); // Last 12 months
+            });
+
+            // Get top performing vehicles
+            $topPerformingVehicles = cache()->remember('top_performing_vehicles', 300, function () {
+                return $this->vehicleService->getTopPerformingVehicles(10);
+            });
+
+            // Get vehicles needing attention (expired documents, etc.)
+            $vehiclesNeedingAttention = $this->vehicleService->getVehiclesNeedingAttention();
+
+            Log::info('Admin accessed vehicle statistics dashboard', [
+                'admin' => session('firebase_user.email'),
+                'timestamp' => now()
+            ]);
+
+            return view('driver::admin.vehicles.statistics', compact(
+                'stats',
+                'statusDistribution',
+                'typeDistribution',
+                'monthlyRegistrations',
+                'topPerformingVehicles',
+                'vehiclesNeedingAttention'
+            ));
+        } catch (\Exception $e) {
+            Log::error('Error loading vehicle statistics: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return redirect()->route('admin.vehicles.index')
+                ->with('error', 'Error loading vehicle statistics: ' . $e->getMessage());
+        }
+    }
+
+    // ============ AJAX ENDPOINTS ============
+
+    /**
+     * AJAX endpoint to load vehicle tabs dynamically
+     */
+    public function loadTab(Request $request, $vehicleId, string $tab)
+    {
+        try {
+            $data = [];
+
+            switch ($tab) {
+                case 'rides':
+                    $data = cache()->remember("vehicle_all_rides_{$vehicleId}", 180, function () use ($vehicleId) {
+                        return $this->vehicleService->getVehicleRides($vehicleId, ['limit' => 50]);
+                    });
+                    break;
+
+                case 'activities':
+                    $data = cache()->remember("vehicle_all_activities_{$vehicleId}", 120, function () use ($vehicleId) {
+                        return $this->vehicleService->getVehicleActivities($vehicleId, ['limit' => 50]);
+                    });
+                    break;
+
+                case 'documents':
+                    $data = $this->vehicleService->getVehicleDocuments($vehicleId);
+                    break;
+
+                case 'maintenance':
+                    $data = $this->vehicleService->getVehicleMaintenanceRecords($vehicleId);
+                    break;
+
+                default:
+                    return response()->json(['error' => 'Invalid tab'], 400);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $data
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error loading vehicle tab: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to load data'], 500);
+        }
+    }
+
+    /**
+     * Update vehicle status (AJAX)
+     */
+    public function updateStatus(Request $request, $vehicleId)
+    {
+        Log::info('AdminVehicleController: updateStatus START', [
+            'vehicle_id' => $vehicleId,
+            'status' => $request->status,
+            'admin' => session('firebase_user.email'),
+            'timestamp' => now()->toDateTimeString()
+        ]);
+
+        $validator = Validator::make($request->all(), [
+            'status' => 'required|in:activate,deactivate,suspend,verify,active,inactive,suspended,maintenance'
+        ]);
+
+        if ($validator->fails()) {
+            Log::warning('AdminVehicleController: Validation failed', [
+                'vehicle_id' => $vehicleId,
+                'errors' => $validator->errors()->all()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid status: ' . implode(', ', $validator->errors()->all())
+            ], 400);
+        }
+
+        try {
+            // Map action to actual status
+            $statusMap = [
+                'activate' => 'active',
+                'deactivate' => 'inactive',
+                'suspend' => 'suspended',
+                'verify' => 'active',
+            ];
+
+            $actualStatus = $statusMap[$request->status] ?? $request->status;
+
+            Log::info('AdminVehicleController: Calling updateVehicleStatus', [
+                'vehicle_id' => $vehicleId,
+                'actual_status' => $actualStatus
+            ]);
+
+            // This will automatically clear cache
+            $result = $this->vehicleService->updateVehicleStatus($vehicleId, $actualStatus);
+
+            Log::info('AdminVehicleController: updateVehicleStatus result', [
+                'vehicle_id' => $vehicleId,
+                'result' => $result ? 'SUCCESS' : 'FAILED'
+            ]);
+
+            // Handle verification separately if needed
+            if ($request->status === 'verify') {
+                Log::info('AdminVehicleController: Updating verification status', [
+                    'vehicle_id' => $vehicleId
+                ]);
+
+                $verificationResult = $this->vehicleService->updateVehicleVerificationStatus(
+                    $vehicleId,
+                    'verified',
+                    session('firebase_user.uid')
+                );
+
+                Log::info('AdminVehicleController: Verification update result', [
+                    'vehicle_id' => $vehicleId,
+                    'verification_result' => $verificationResult ? 'SUCCESS' : 'FAILED'
+                ]);
+            }
+
+            if ($result) {
+                Log::info('AdminVehicleController: Status update completed successfully', [
+                    'vehicle_id' => $vehicleId,
+                    'final_status' => $actualStatus
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Vehicle status updated successfully!',
+                    'new_status' => $actualStatus,
+                    'timestamp' => now()->toDateTimeString()
+                ]);
+            } else {
+                Log::error('AdminVehicleController: Failed to update vehicle status', [
+                    'vehicle_id' => $vehicleId,
+                    'requested_status' => $actualStatus
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to update vehicle status'
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('AdminVehicleController: Exception in updateStatus', [
+                'vehicle_id' => $vehicleId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating status: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update verification status (AJAX)
+     */
+    public function updateVerificationStatus(Request $request, $vehicleId)
+    {
+        $validator = Validator::make($request->all(), [
+            'verification_status' => 'required|in:pending,verified,rejected',
+            'notes' => 'nullable|string|max:1000'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid verification status'
+            ], 400);
+        }
+
+        try {
+            $result = $this->vehicleService->updateVehicleVerificationStatus(
+                $vehicleId,
+                $request->verification_status,
+                session('firebase_user.uid'),
+                $request->notes
+            );
+
+            if ($result) {
+                Log::info('Admin updated vehicle verification status', [
+                    'admin' => session('firebase_user.email'),
+                    'vehicle_id' => $vehicleId,
+                    'verification_status' => $request->verification_status
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Verification status updated successfully!'
+                ]);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to update verification status'
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Error updating verification status: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating verification: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    // ============ CRUD OPERATIONS ============
+
     /**
      * Show form for creating new vehicle
      */
-    public function create(Request $request)
+    public function create()
     {
-        $driverFirebaseUid = $request->get('driver_firebase_uid');
-        $driver = null;
-        
-        if ($driverFirebaseUid) {
-            $driver = $this->driverService->getDriverById($driverFirebaseUid);
-        }
+        $drivers = Driver::active()->get();
 
         return view('driver::admin.vehicles.create', [
-            'driver' => $driver,
+            'drivers' => $drivers,
+            'statuses' => Vehicle::getStatuses(),
+            'verificationStatuses' => Vehicle::getVerificationStatuses(),
             'vehicleTypes' => Vehicle::getVehicleTypes(),
             'fuelTypes' => Vehicle::getFuelTypes(),
-            'statuses' => $this->getVehicleStatuses(),
-            'verificationStatuses' => $this->getVerificationStatuses(),
-            'drivers' => $this->driverService->getAllDrivers(['limit' => 1000])
+            'documentTypes' => DriverDocument::getDocumentTypes()
         ]);
     }
 
@@ -166,19 +440,127 @@ class AdminVehicleController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'driver_firebase_uid' => 'required|string',
+            'driver_firebase_uid' => 'required|string|exists:drivers,firebase_uid',
             'make' => 'required|string|max:100',
             'model' => 'required|string|max:100',
-            'year' => 'required|integer|between:1900,' . (date('Y') + 1),
-            'color' => 'required|string|max:50',
-            'license_plate' => 'required|string|max:20',
-            'vin' => 'nullable|string|max:50',
-            'vehicle_type' => 'required|in:' . implode(',', array_keys(Vehicle::getVehicleTypes())),
-            'fuel_type' => 'nullable|in:' . implode(',', array_keys(Vehicle::getFuelTypes())),
-            'transmission' => 'nullable|in:manual,automatic,cvt',
-            'doors' => 'nullable|integer|between:2,6',
-            'seats' => 'required|integer|between:1,20',
-            'status' => 'required|in:active,inactive,maintenance,suspended',
+            'year' => 'required|integer|min:1990|max:' . (date('Y') + 1),
+            'color' => 'nullable|string|max:50',
+            'license_plate' => 'required|string|max:20|unique:vehicles,license_plate',
+            'vin' => 'nullable|string|max:17|unique:vehicles,vin',
+            'vehicle_type' => 'required|string|max:50',
+            'fuel_type' => 'nullable|string|max:50',
+            'seats' => 'nullable|integer|min:2|max:50',
+            'registration_number' => 'nullable|string|max:50',
+            'registration_expiry' => 'nullable|date|after:today',
+            'insurance_provider' => 'nullable|string|max:100',
+            'insurance_policy_number' => 'nullable|string|max:50',
+            'insurance_expiry' => 'nullable|date|after:today',
+            'status' => 'required|in:active,inactive,suspended,maintenance',
+            'verification_status' => 'required|in:pending,verified,rejected',
+            'is_primary' => 'boolean',
+
+            // Document validation
+            'vehicle_registration_doc' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+            'insurance_certificate' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+            'vehicle_photos.*' => 'nullable|image|mimes:jpeg,png,jpg|max:5120'
+        ]);
+
+        if ($validator->fails()) {
+            return redirect()->back()
+                ->withErrors($validator)
+                ->withInput();
+        }
+
+        try {
+            // Prepare vehicle data
+            $vehicleData = $this->prepareVehicleData($request);
+
+            // Create vehicle
+            $vehicle = $this->vehicleService->createVehicle($vehicleData);
+
+            if (!$vehicle) {
+                return redirect()->back()
+                    ->with('error', 'Failed to create vehicle.')
+                    ->withInput();
+            }
+
+            // Upload documents if provided
+            $this->uploadVehicleDocuments($request, $vehicle->id);
+
+            Log::info('Admin created vehicle', [
+                'admin' => session('firebase_user.email'),
+                'vehicle_id' => $vehicle->id,
+                'driver_id' => $request->driver_firebase_uid,
+                'documents_uploaded' => $this->countUploadedFiles($request)
+            ]);
+
+            return redirect()->route('admin.vehicles.show', $vehicle->id)
+                ->with('success', 'Vehicle created successfully!');
+        } catch (\Exception $e) {
+            Log::error('Error creating vehicle: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return redirect()->back()
+                ->with('error', 'Error creating vehicle: ' . $e->getMessage())
+                ->withInput();
+        }
+    }
+
+    /**
+     * Show form for editing vehicle
+     */
+    public function edit($vehicleId)
+    {
+        try {
+            $vehicle = $this->vehicleService->getVehicleById($vehicleId);
+
+            if (!$vehicle) {
+                return redirect()->route('admin.vehicles.index')
+                    ->with('error', 'Vehicle not found.');
+            }
+
+            $drivers = Driver::active()->get();
+            $documents = $this->vehicleService->getVehicleDocuments($vehicleId);
+
+            return view('driver::admin.vehicles.edit', [
+                'vehicle' => $vehicle,
+                'drivers' => $drivers,
+                'documents' => $documents,
+                'statuses' => Vehicle::getStatuses(),
+                'verificationStatuses' => Vehicle::getVerificationStatuses(),
+                'vehicleTypes' => Vehicle::getVehicleTypes(),
+                'fuelTypes' => Vehicle::getFuelTypes(),
+                'documentTypes' => DriverDocument::getDocumentTypes()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error loading vehicle for edit: ' . $e->getMessage());
+            return redirect()->route('admin.vehicles.index')
+                ->with('error', 'Error loading vehicle for editing.');
+        }
+    }
+
+    /**
+     * Update vehicle information
+     */
+    public function update(Request $request, $vehicleId)
+    {
+        $validator = Validator::make($request->all(), [
+            'driver_firebase_uid' => 'required|string|exists:drivers,firebase_uid',
+            'make' => 'required|string|max:100',
+            'model' => 'required|string|max:100',
+            'year' => 'required|integer|min:1990|max:' . (date('Y') + 1),
+            'color' => 'nullable|string|max:50',
+            'license_plate' => 'required|string|max:20|unique:vehicles,license_plate,' . $vehicleId,
+            'vin' => 'nullable|string|max:17|unique:vehicles,vin,' . $vehicleId,
+            'vehicle_type' => 'required|string|max:50',
+            'fuel_type' => 'nullable|string|max:50',
+            'seats' => 'nullable|integer|min:2|max:50',
+            'registration_number' => 'nullable|string|max:50',
+            'registration_expiry' => 'nullable|date|after:today',
+            'insurance_provider' => 'nullable|string|max:100',
+            'insurance_policy_number' => 'nullable|string|max:50',
+            'insurance_expiry' => 'nullable|date|after:today',
+            'status' => 'required|in:active,inactive,suspended,maintenance',
             'verification_status' => 'required|in:pending,verified,rejected',
             'is_primary' => 'boolean'
         ]);
@@ -191,114 +573,16 @@ class AdminVehicleController extends Controller
 
         try {
             $vehicleData = $request->all();
-            $vehicleData['created_by'] = session('firebase_user.uid');
-
-            $result = $this->driverService->createVehicle($vehicleData);
-
-            if ($result) {
-                // Set as primary if requested
-                if ($request->is_primary) {
-                    $this->driverService->setPrimaryVehicle(
-                        $request->driver_firebase_uid, 
-                        $result['id']
-                    );
-                }
-
-                Log::info('Admin created vehicle', [
-                    'admin' => session('firebase_user.email'),
-                    'vehicle_id' => $result['id'] ?? 'unknown',
-                    'driver_id' => $request->driver_firebase_uid
-                ]);
-                
-                return redirect()->route('admin.vehicles.index')
-                    ->with('success', 'Vehicle created successfully!');
-            } else {
-                return redirect()->back()
-                    ->with('error', 'Failed to create vehicle.')
-                    ->withInput();
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Error creating vehicle: ' . $e->getMessage());
-            return redirect()->back()
-                ->with('error', 'Error creating vehicle: ' . $e->getMessage())
-                ->withInput();
-        }
-    }
-
-    /**
-     * Show form for editing vehicle
-     */
-    public function edit(string $vehicleId)
-    {
-        try {
-            $vehicle = $this->DriverVehicleService->getVehicleById($vehicleId);
-            
-            if (!$vehicle) {
-                return redirect()->route('admin.vehicles.index')
-                    ->with('error', 'Vehicle not found.');
-            }
-
-            $driver = $this->driverService->getDriverById($vehicle['driver_firebase_uid']);
-
-            return view('driver::admin.vehicles.edit', [
-                'vehicle' => $vehicle,
-                'driver' => $driver,
-                'vehicleTypes' => Vehicle::getVehicleTypes(),
-                'fuelTypes' => Vehicle::getFuelTypes(),
-                'statuses' => $this->getVehicleStatuses(),
-                'verificationStatuses' => $this->getVerificationStatuses()
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error('Error loading vehicle for edit: ' . $e->getMessage());
-            return redirect()->route('admin.vehicles.index')
-                ->with('error', 'Error loading vehicle for editing.');
-        }
-    }
-
-    /**
-     * Update vehicle information
-     */
-    public function update(Request $request, string $vehicleId)
-    {
-        $validator = Validator::make($request->all(), [
-            'make' => 'required|string|max:100',
-            'model' => 'required|string|max:100',
-            'year' => 'required|integer|between:1900,' . (date('Y') + 1),
-            'color' => 'required|string|max:50',
-            'license_plate' => 'required|string|max:20',
-            'vin' => 'nullable|string|max:50',
-            'vehicle_type' => 'required|in:' . implode(',', array_keys(Vehicle::getVehicleTypes())),
-            'fuel_type' => 'nullable|in:' . implode(',', array_keys(Vehicle::getFuelTypes())),
-            'transmission' => 'nullable|in:manual,automatic,cvt',
-            'doors' => 'nullable|integer|between:2,6',
-            'seats' => 'required|integer|between:1,20',
-            'status' => 'required|in:active,inactive,maintenance,suspended',
-            'verification_status' => 'required|in:pending,verified,rejected',
-            'mileage' => 'nullable|integer|min:0',
-            'condition_rating' => 'nullable|numeric|between:1,5',
-            'notes' => 'nullable|string|max:1000'
-        ]);
-
-        if ($validator->fails()) {
-            return redirect()->back()
-                ->withErrors($validator)
-                ->withInput();
-        }
-
-        try {
-            $vehicleData = $request->all();
             $vehicleData['updated_by'] = session('firebase_user.uid');
 
-            $result = $this->driverService->updateVehicle($vehicleId, $vehicleData);
+            $result = $this->vehicleService->updateVehicle($vehicleId, $vehicleData);
 
             if ($result) {
                 Log::info('Admin updated vehicle', [
                     'admin' => session('firebase_user.email'),
                     'vehicle_id' => $vehicleId
                 ]);
-                
+
                 return redirect()->route('admin.vehicles.show', $vehicleId)
                     ->with('success', 'Vehicle updated successfully!');
             } else {
@@ -306,7 +590,6 @@ class AdminVehicleController extends Controller
                     ->with('error', 'Failed to update vehicle.')
                     ->withInput();
             }
-
         } catch (\Exception $e) {
             Log::error('Error updating vehicle: ' . $e->getMessage());
             return redirect()->back()
@@ -318,31 +601,30 @@ class AdminVehicleController extends Controller
     /**
      * Delete vehicle
      */
-    public function destroy(string $vehicleId)
+    public function destroy($vehicleId)
     {
         try {
-            $vehicle = $this->DriverVehicleService->getVehicleById($vehicleId);
-            
+            $vehicle = $this->vehicleService->getVehicleById($vehicleId);
+
             if (!$vehicle) {
                 return redirect()->route('admin.vehicles.index')
                     ->with('error', 'Vehicle not found.');
             }
 
-            $result = $this->driverService->deleteVehicle($vehicleId);
+            $result = $this->vehicleService->deleteVehicle($vehicleId);
 
             if ($result) {
                 Log::info('Admin deleted vehicle', [
                     'admin' => session('firebase_user.email'),
                     'vehicle_id' => $vehicleId
                 ]);
-                
+
                 return redirect()->route('admin.vehicles.index')
                     ->with('success', 'Vehicle deleted successfully!');
             } else {
                 return redirect()->back()
                     ->with('error', 'Failed to delete vehicle.');
             }
-
         } catch (\Exception $e) {
             Log::error('Error deleting vehicle: ' . $e->getMessage());
             return redirect()->back()
@@ -350,101 +632,7 @@ class AdminVehicleController extends Controller
         }
     }
 
-    /**
-     * Update vehicle verification status (AJAX)
-     */
-    public function updateVerificationStatus(Request $request, string $vehicleId)
-    {
-        $validator = Validator::make($request->all(), [
-            'verification_status' => 'required|in:pending,verified,rejected'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false, 
-                'message' => 'Invalid verification status'
-            ], 400);
-        }
-
-        try {
-            $result = $this->driverService->updateVehicleVerificationStatus(
-                $vehicleId, 
-                $request->verification_status
-            );
-
-            if ($result) {
-                Log::info('Admin updated vehicle verification status', [
-                    'admin' => session('firebase_user.email'),
-                    'vehicle_id' => $vehicleId,
-                    'verification_status' => $request->verification_status
-                ]);
-
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Vehicle verification status updated successfully!'
-                ]);
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Failed to update verification status'
-                ]);
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Error updating vehicle verification status: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error updating verification: ' . $e->getMessage()
-            ]);
-        }
-    }
-
-    /**
-     * Set vehicle as primary (AJAX)
-     */
-    public function setPrimary(Request $request, string $vehicleId)
-    {
-        try {
-            $vehicle = $this->DriverVehicleService->getVehicleById($vehicleId);
-            
-            if (!$vehicle) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Vehicle not found'
-                ], 404);
-            }
-
-            $result = $this->driverService->setPrimaryVehicle(
-                $vehicle['driver_firebase_uid'], 
-                $vehicleId
-            );
-
-            if ($result) {
-                Log::info('Admin set primary vehicle', [
-                    'admin' => session('firebase_user.email'),
-                    'vehicle_id' => $vehicleId,
-                    'driver_id' => $vehicle['driver_firebase_uid']
-                ]);
-
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Primary vehicle set successfully!'
-                ]);
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Failed to set primary vehicle'
-                ]);
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Error setting primary vehicle: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error setting primary vehicle: ' . $e->getMessage()
-            ]);
-        }
-    }
+    // ============ BULK OPERATIONS ============
 
     /**
      * Bulk operations on vehicles
@@ -452,59 +640,49 @@ class AdminVehicleController extends Controller
     public function bulkAction(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'action' => 'required|in:verify,reject,activate,deactivate,delete',
+            'action' => 'required|in:activate,deactivate,suspend,verify,delete',
             'vehicle_ids' => 'required|array|min:1',
-            'vehicle_ids.*' => 'required|string'
+            'vehicle_ids.*' => 'required|integer'
         ]);
 
         if ($validator->fails()) {
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Invalid input'
             ], 400);
         }
 
         try {
-            $action = $request->action;
-            $vehicleIds = $request->vehicle_ids;
-            
-            $processedCount = 0;
-            $failedCount = 0;
+            $result = $this->vehicleService->performBulkAction(
+                $request->action,
+                $request->vehicle_ids
+            );
 
-            foreach ($vehicleIds as $vehicleId) {
-                try {
-                    $success = $this->executeBulkVehicleAction($action, $vehicleId);
-                    if ($success) {
-                        $processedCount++;
-                    } else {
-                        $failedCount++;
-                    }
-                } catch (\Exception $e) {
-                    $failedCount++;
-                    Log::warning('Bulk vehicle action failed', [
-                        'vehicle_id' => $vehicleId,
-                        'action' => $action,
-                        'error' => $e->getMessage()
-                    ]);
-                }
+            if ($result['success']) {
+                Log::info('Admin performed bulk action on vehicles', [
+                    'admin' => session('firebase_user.email'),
+                    'action' => $request->action,
+                    'count' => count($request->vehicle_ids)
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => $this->getBulkActionMessage(
+                        $request->action,
+                        $result['processed_count'],
+                        $result['failed_count']
+                    ),
+                    'processed_count' => $result['processed_count'],
+                    'failed_count' => $result['failed_count']
+                ]);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => $result['message']
+                ]);
             }
-
-            Log::info('Admin performed bulk vehicle action', [
-                'admin' => session('firebase_user.email'),
-                'action' => $action,
-                'processed' => $processedCount,
-                'failed' => $failedCount
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => $this->getBulkVehicleActionMessage($action, $processedCount, $failedCount),
-                'processed_count' => $processedCount,
-                'failed_count' => $failedCount
-            ]);
-
         } catch (\Exception $e) {
-            Log::error('Bulk vehicle action error: ' . $e->getMessage());
+            Log::error('Bulk action error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error performing bulk action: ' . $e->getMessage()
@@ -512,88 +690,265 @@ class AdminVehicleController extends Controller
         }
     }
 
-    /**
-     * Vehicle statistics
-     */
-    public function statistics()
-    {
-        try {
-            $statistics = $this->driverService->getSystemAnalytics()['vehicle_statistics'] ?? [];
-            
-            return view('driver::admin.vehicles.statistics', compact('statistics'));
+    // ============ IMPORT/EXPORT ============
 
-        } catch (\Exception $e) {
-            Log::error('Error loading vehicle statistics: ' . $e->getMessage());
+    /**
+     * Export vehicles data
+     */
+    public function export(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'format' => 'required|in:csv,excel',
+            'status' => 'nullable|in:active,inactive,suspended,maintenance',
+            'verification_status' => 'nullable|in:pending,verified,rejected',
+            'vehicle_type' => 'nullable|string',
+            'created_from' => 'nullable|date',
+            'created_to' => 'nullable|date|after_or_equal:created_from'
+        ]);
+
+        if ($validator->fails()) {
             return redirect()->route('admin.vehicles.index')
-                ->with('error', 'Error loading statistics.');
+                ->with('error', 'Invalid export parameters.');
+        }
+
+        try {
+            $filters = [
+                'status' => $request->status,
+                'verification_status' => $request->verification_status,
+                'vehicle_type' => $request->vehicle_type,
+                'created_from' => $request->created_from,
+                'created_to' => $request->created_to
+            ];
+
+            $vehicles = $this->vehicleService->exportVehicles($filters);
+
+            $filename = 'vehicles_export_' . now()->format('Y_m_d_H_i_s') . '.csv';
+
+            Log::info('Admin exported vehicles', [
+                'admin' => session('firebase_user.email'),
+                'count' => count($vehicles),
+                'filters' => $filters
+            ]);
+
+            return $this->generateCsvExport($vehicles, $filename);
+        } catch (\Exception $e) {
+            Log::error('Error exporting vehicles: ' . $e->getMessage());
+            return redirect()->route('admin.vehicles.index')
+                ->with('error', 'Error exporting vehicles: ' . $e->getMessage());
+        }
+    }
+
+    // ============ HELPER METHODS ============
+
+    /**
+     * Prepare vehicle data from request
+     */
+    private function prepareVehicleData(Request $request): array
+    {
+        return [
+            'driver_firebase_uid' => $request->driver_firebase_uid,
+            'make' => $request->make,
+            'model' => $request->model,
+            'year' => $request->year,
+            'color' => $request->color,
+            'license_plate' => $request->license_plate,
+            'vin' => $request->vin,
+            'vehicle_type' => $request->vehicle_type,
+            'fuel_type' => $request->fuel_type,
+            'seats' => $request->seats ?? 4,
+            'registration_number' => $request->registration_number,
+            'registration_expiry' => $request->registration_expiry,
+            'insurance_provider' => $request->insurance_provider,
+            'insurance_policy_number' => $request->insurance_policy_number,
+            'insurance_expiry' => $request->insurance_expiry,
+            'status' => $request->status,
+            'verification_status' => $request->verification_status,
+            'is_primary' => $request->boolean('is_primary'),
+            'created_by' => session('firebase_user.uid')
+        ];
+    }
+
+    /**
+     * Upload vehicle documents
+     */
+    private function uploadVehicleDocuments(Request $request, $vehicleId): void
+    {
+        $documentTypes = [
+            'vehicle_registration_doc' => DriverDocument::TYPE_VEHICLE_REGISTRATION,
+            'insurance_certificate' => DriverDocument::TYPE_INSURANCE_CERTIFICATE
+        ];
+
+        foreach ($documentTypes as $inputName => $documentType) {
+            if ($request->hasFile($inputName)) {
+                try {
+                    $file = $request->file($inputName);
+                    $documentData = [
+                        'document_type' => $documentType,
+                        'document_name' => $this->getDocumentName($inputName, $file->getClientOriginalName()),
+                        'vehicle_id' => $vehicleId
+                    ];
+
+                    $result = $this->documentService->uploadVehicleDocument($vehicleId, $file, $documentData);
+
+                    if ($result) {
+                        Log::info('Document uploaded for vehicle', [
+                            'vehicle_id' => $vehicleId,
+                            'document_type' => $documentType,
+                            'file_name' => $file->getClientOriginalName()
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('Failed to upload document for vehicle', [
+                        'vehicle_id' => $vehicleId,
+                        'document_type' => $documentType,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+        }
+
+        // Handle multiple vehicle photos
+        if ($request->hasFile('vehicle_photos')) {
+            foreach ($request->file('vehicle_photos') as $index => $photo) {
+                try {
+                    $documentData = [
+                        'document_type' => DriverDocument::TYPE_VEHICLE_PHOTO,
+                        'document_name' => "Vehicle Photo " . ($index + 1),
+                        'vehicle_id' => $vehicleId
+                    ];
+
+                    $this->documentService->uploadVehicleDocument($vehicleId, $photo, $documentData);
+                } catch (\Exception $e) {
+                    Log::warning('Failed to upload vehicle photo', [
+                        'vehicle_id' => $vehicleId,
+                        'photo_index' => $index,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
         }
     }
 
     /**
-     * Helper: Execute bulk vehicle action
+     * Get document name based on input type
      */
-    private function executeBulkVehicleAction(string $action, string $vehicleId): bool
+    private function getDocumentName(string $inputName, string $originalName): string
     {
-        switch ($action) {
-            case 'verify':
-                return $this->driverService->updateVehicleVerificationStatus($vehicleId, 'verified');
-            case 'reject':
-                return $this->driverService->updateVehicleVerificationStatus($vehicleId, 'rejected');
-            case 'activate':
-                return $this->driverService->updateVehicle($vehicleId, ['status' => 'active']);
-            case 'deactivate':
-                return $this->driverService->updateVehicle($vehicleId, ['status' => 'inactive']);
-            case 'delete':
-                return $this->driverService->deleteVehicle($vehicleId);
-            default:
-                return false;
-        }
+        $nameMap = [
+            'vehicle_registration_doc' => 'Vehicle Registration',
+            'insurance_certificate' => 'Insurance Certificate'
+        ];
+
+        return $nameMap[$inputName] ?? $originalName;
     }
 
     /**
-     * Helper: Get bulk vehicle action message
+     * Count uploaded files in request
      */
-    private function getBulkVehicleActionMessage(string $action, int $processed, int $failed): string
+    private function countUploadedFiles(Request $request): int
     {
-        $actionPast = [
-            'verify' => 'verified',
-            'reject' => 'rejected', 
-            'activate' => 'activated',
-            'deactivate' => 'deactivated',
-            'delete' => 'deleted'
-        ][$action];
+        $count = 0;
+        $fileFields = ['vehicle_registration_doc', 'insurance_certificate'];
 
-        $message = "Successfully {$actionPast} {$processed} vehicles";
-        
+        foreach ($fileFields as $field) {
+            if ($request->hasFile($field)) {
+                $count++;
+            }
+        }
+
+        if ($request->hasFile('vehicle_photos')) {
+            $count += count($request->file('vehicle_photos'));
+        }
+
+        return $count;
+    }
+
+    /**
+     * Generate bulk action message
+     */
+    private function getBulkActionMessage(string $action, int $processed, int $failed): string
+    {
+        $messages = [
+            'activate' => "Activated {$processed} vehicles",
+            'deactivate' => "Deactivated {$processed} vehicles",
+            'suspend' => "Suspended {$processed} vehicles",
+            'verify' => "Verified {$processed} vehicles",
+            'delete' => "Deleted {$processed} vehicles"
+        ];
+
+        $message = $messages[$action] ?? "Processed {$processed} vehicles";
+
         if ($failed > 0) {
             $message .= " ({$failed} failed)";
         }
-        
-        return $message . ".";
+
+        return $message;
     }
 
     /**
-     * Helper: Get vehicle statuses
+     * Generate CSV export response
      */
-    private function getVehicleStatuses(): array
+    private function generateCsvExport($vehicles, $filename)
     {
-        return [
-            'active' => 'Active',
-            'inactive' => 'Inactive',
-            'maintenance' => 'Under Maintenance',
-            'suspended' => 'Suspended'
-        ];
-    }
+        $headers = array(
+            "Content-type"        => "text/csv",
+            "Content-Disposition" => "attachment; filename=$filename",
+            "Pragma"              => "no-cache",
+            "Cache-Control"       => "must-revalidate, post-check=0, pre-check=0",
+            "Expires"             => "0"
+        );
 
-    /**
-     * Helper: Get verification statuses
-     */
-    private function getVerificationStatuses(): array
-    {
-        return [
-            'pending' => 'Pending',
-            'verified' => 'Verified',
-            'rejected' => 'Rejected'
-        ];
+        $callback = function () use ($vehicles) {
+            $file = fopen('php://output', 'w');
+            fputcsv($file, [
+                'ID',
+                'Driver ID',
+                'Make',
+                'Model',
+                'Year',
+                'Color',
+                'License Plate',
+                'VIN',
+                'Vehicle Type',
+                'Fuel Type',
+                'Seats',
+                'Status',
+                'Verification Status',
+                'Is Primary',
+                'Registration Number',
+                'Registration Expiry',
+                'Insurance Provider',
+                'Insurance Expiry',
+                'Created At'
+            ]);
+
+            foreach ($vehicles as $vehicle) {
+                fputcsv($file, [
+                    $vehicle->id ?? '',
+                    $vehicle->driver_firebase_uid ?? '',
+                    $vehicle->make ?? '',
+                    $vehicle->model ?? '',
+                    $vehicle->year ?? '',
+                    $vehicle->color ?? '',
+                    $vehicle->license_plate ?? '',
+                    $vehicle->vin ?? '',
+                    $vehicle->vehicle_type ?? '',
+                    $vehicle->fuel_type ?? '',
+                    $vehicle->seats ?? '',
+                    $vehicle->status ?? '',
+                    $vehicle->verification_status ?? '',
+                    $vehicle->is_primary ? 'Yes' : 'No',
+                    $vehicle->registration_number ?? '',
+                    $vehicle->registration_expiry ?? '',
+                    $vehicle->insurance_provider ?? '',
+                    $vehicle->insurance_expiry ?? '',
+                    $vehicle->created_at ?? ''
+                ]);
+            }
+
+            fclose($file);
+        };
+
+        return response()->stream($callback, 200, $headers);
     }
 }

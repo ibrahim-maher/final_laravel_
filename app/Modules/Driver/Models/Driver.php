@@ -1,14 +1,18 @@
 <?php
+// app/Modules/Driver/Models/Driver.php
 
 namespace App\Modules\Driver\Models;
 
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
+use App\Traits\FirebaseSyncable;
 
-class Driver
+class Driver extends Model
 {
-    // Driver data fields
-    protected $attributes = [];
-    
+    use HasFactory, FirebaseSyncable;
+
     protected $fillable = [
         'firebase_uid',
         'name',
@@ -27,10 +31,14 @@ class Driver
         'license_number',
         'license_expiry',
         'license_class',
+        'license_type',
         'license_state',
+        'issuing_state',
         'status',
         'verification_status',
         'verification_date',
+        'verified_by',
+        'verification_notes',
         'availability_status',
         'rating',
         'total_rides',
@@ -39,6 +47,7 @@ class Driver
         'total_earnings',
         'current_location_lat',
         'current_location_lng',
+        'current_address',
         'last_location_update',
         'join_date',
         'last_active',
@@ -53,9 +62,31 @@ class Driver
         'bank_routing_number',
         'bank_account_holder_name',
         'tax_id',
-        'created_at',
-        'updated_at'
+        'firebase_synced',
+        'firebase_synced_at'
     ];
+
+    protected $casts = [
+        'date_of_birth' => 'date',
+        'license_expiry' => 'date',
+        'verification_date' => 'datetime',
+        'last_location_update' => 'datetime',
+        'join_date' => 'datetime',
+        'last_active' => 'datetime',
+        'background_check_date' => 'date',
+        'drug_test_date' => 'date',
+        'insurance_expiry' => 'date',
+        'firebase_synced' => 'boolean',
+        'firebase_synced_at' => 'datetime',
+        'rating' => 'decimal:2',
+        'total_earnings' => 'decimal:2',
+        'current_location_lat' => 'decimal:8',
+        'current_location_lng' => 'decimal:8',
+    ];
+
+    // Firebase sync configuration
+    protected $firebaseCollection = 'drivers';
+    protected $firebaseKey = 'firebase_uid';
 
     // Status constants
     const STATUS_ACTIVE = 'active';
@@ -73,155 +104,278 @@ class Driver
     const AVAILABILITY_BUSY = 'busy';
     const AVAILABILITY_OFFLINE = 'offline';
 
-    /**
-     * Constructor
-     */
-    public function __construct(array $data = [])
+    // Standard Eloquent relationships for SQL-based models
+    public function vehicles()
     {
-        $this->attributes = $data;
+        return $this->hasMany(Vehicle::class, 'driver_firebase_uid', 'firebase_uid');
     }
 
-    /**
-     * Get attribute value
-     */
-    public function __get($key)
+    public function documents()
     {
-        return $this->attributes[$key] ?? null;
+        return $this->hasMany(DriverDocument::class, 'driver_firebase_uid', 'firebase_uid');
     }
 
-    /**
-     * Set attribute value
-     */
-    public function __set($key, $value)
+    public function licenses()
     {
-        $this->attributes[$key] = $value;
+        return $this->hasMany(DriverLicense::class, 'driver_firebase_uid', 'firebase_uid');
     }
 
-    /**
-     * Check if attribute exists
-     */
-    public function __isset($key)
+    public function activities()
     {
-        return isset($this->attributes[$key]);
+        return $this->hasMany(DriverActivity::class, 'driver_firebase_uid', 'firebase_uid');
     }
 
-    /**
-     * Convert to array
-     */
-    public function toArray(): array
+    // FIXED: Custom method for Firestore-based rides (replaces the problematic Eloquent relationship)
+    public function getRides($filters = [])
     {
-        return $this->attributes;
+        try {
+            $rideModel = new Ride();
+            return $rideModel->getRidesByDriver($this->firebase_uid, $filters);
+        } catch (\Exception $e) {
+            Log::error('Error getting rides for driver: ' . $e->getMessage(), [
+                'driver_uid' => $this->firebase_uid
+            ]);
+            return [];
+        }
     }
 
-    /**
-     * Create instance from Firestore data
-     */
-    public static function fromFirestore(array $data): self
+    // FIXED: Custom method for getting active rides
+    public function getActiveRides()
     {
-        return new static($data);
+        try {
+            $rideModel = new Ride();
+            return $rideModel->getActiveRidesForDriver($this->firebase_uid);
+        } catch (\Exception $e) {
+            Log::error('Error getting active rides for driver: ' . $e->getMessage(), [
+                'driver_uid' => $this->firebase_uid
+            ]);
+            return [];
+        }
     }
 
-    /**
-     * Check if driver is active
-     */
-    public function isActive(): bool
+    // FIXED: Custom method for ride statistics
+    public function getRideStatistics()
     {
-        return $this->status === self::STATUS_ACTIVE;
+        try {
+            $rideModel = new Ride();
+            $rides = $rideModel->getRidesByDriver($this->firebase_uid);
+            
+            return $this->calculateRideStatistics($rides);
+        } catch (\Exception $e) {
+            Log::error('Error getting ride statistics for driver: ' . $e->getMessage(), [
+                'driver_uid' => $this->firebase_uid
+            ]);
+            return [
+                'total_rides' => 0,
+                'completed_rides' => 0,
+                'cancelled_rides' => 0,
+                'completion_rate' => 0,
+                'total_earnings' => 0,
+                'average_rating' => 0
+            ];
+        }
     }
 
-    /**
-     * Check if driver is verified
-     */
-    public function isVerified(): bool
+    // Helper method to calculate statistics from rides array
+    private function calculateRideStatistics($rides)
     {
-        return $this->verification_status === self::VERIFICATION_VERIFIED;
+        if (empty($rides)) {
+            return [
+                'total_rides' => 0,
+                'completed_rides' => 0,
+                'cancelled_rides' => 0,
+                'completion_rate' => 0,
+                'total_earnings' => 0,
+                'average_rating' => 0
+            ];
+        }
+
+        $stats = [
+            'total_rides' => count($rides),
+            'completed_rides' => 0,
+            'cancelled_rides' => 0,
+            'total_earnings' => 0,
+            'total_rating' => 0,
+            'rated_rides' => 0
+        ];
+
+        foreach ($rides as $ride) {
+            if (($ride['status'] ?? '') === Ride::STATUS_COMPLETED) {
+                $stats['completed_rides']++;
+            }
+            if (($ride['status'] ?? '') === Ride::STATUS_CANCELLED) {
+                $stats['cancelled_rides']++;
+            }
+
+            // Calculate earnings
+            if (!empty($ride['actual_fare'])) {
+                $stats['total_earnings'] += (float) $ride['actual_fare'];
+            } elseif (!empty($ride['estimated_fare'])) {
+                $stats['total_earnings'] += (float) $ride['estimated_fare'];
+            }
+
+            // Calculate rating
+            if (!empty($ride['driver_rating']) && $ride['driver_rating'] > 0) {
+                $stats['total_rating'] += (float) $ride['driver_rating'];
+                $stats['rated_rides']++;
+            }
+        }
+
+        $stats['completion_rate'] = $stats['total_rides'] > 0 
+            ? round(($stats['completed_rides'] / $stats['total_rides']) * 100, 2)
+            : 0;
+
+        $stats['average_rating'] = $stats['rated_rides'] > 0
+            ? round($stats['total_rating'] / $stats['rated_rides'], 2)
+            : 0;
+
+        return $stats;
     }
 
-    /**
-     * Check if driver is available
-     */
-    public function isAvailable(): bool
+    // Scopes
+    public function scopeActive($query)
     {
-        return $this->availability_status === self::AVAILABILITY_AVAILABLE && $this->isActive();
+        return $query->where('status', self::STATUS_ACTIVE);
     }
 
-    /**
-     * Get driver's full name
-     */
-    public function getFullNameAttribute(): string
+    public function scopeVerified($query)
+    {
+        return $query->where('verification_status', self::VERIFICATION_VERIFIED);
+    }
+
+    public function scopeAvailable($query)
+    {
+        return $query->where('availability_status', self::AVAILABILITY_AVAILABLE)
+                     ->where('status', self::STATUS_ACTIVE);
+    }
+
+    public function scopeNearby($query, $latitude, $longitude, $radius = 10)
+    {
+        $haversine = "(6371 * acos(cos(radians($latitude)) 
+                     * cos(radians(current_location_lat)) 
+                     * cos(radians(current_location_lng) 
+                     - radians($longitude)) 
+                     + sin(radians($latitude)) 
+                     * sin(radians(current_location_lat))))";
+        
+        return $query->selectRaw("*, $haversine AS distance")
+                     ->whereRaw("$haversine < ?", [$radius])
+                     ->orderBy('distance');
+    }
+
+    public function scopeUnsynced($query)
+    {
+        return $query->where('firebase_synced', false);
+    }
+
+    // Accessors & Mutators
+    public function getFullNameAttribute()
     {
         return $this->name ?? 'Unknown Driver';
     }
 
-    /**
-     * Get driver's age
-     */
-    public function getAgeAttribute(): ?int
+    public function getAgeAttribute()
     {
-        if (!$this->date_of_birth) {
-            return null;
-        }
-        
-        return Carbon::parse($this->date_of_birth)->age;
+        return $this->date_of_birth ? $this->date_of_birth->age : null;
     }
 
-    /**
-     * Get completion rate
-     */
-    public function getCompletionRateAttribute(): float
+    public function getCompletionRateAttribute()
     {
-        if (($this->total_rides ?? 0) == 0) {
-            return 0;
-        }
-        
-        return round((($this->completed_rides ?? 0) / $this->total_rides) * 100, 2);
+        if ($this->total_rides == 0) return 0;
+        return round(($this->completed_rides / $this->total_rides) * 100, 2);
     }
 
-    /**
-     * Get cancellation rate
-     */
-    public function getCancellationRateAttribute(): float
+    public function getCancellationRateAttribute()
     {
-        if (($this->total_rides ?? 0) == 0) {
-            return 0;
-        }
-        
-        return round((($this->cancelled_rides ?? 0) / $this->total_rides) * 100, 2);
+        if ($this->total_rides == 0) return 0;
+        return round(($this->cancelled_rides / $this->total_rides) * 100, 2);
     }
 
-    /**
-     * Get status badge color
-     */
-    public function getStatusColorAttribute(): string
+    // Helper methods
+    public function isActive()
     {
-        $colors = [
-            self::STATUS_ACTIVE => 'success',
-            self::STATUS_INACTIVE => 'secondary',
-            self::STATUS_SUSPENDED => 'danger',
-            self::STATUS_PENDING => 'warning'
+        return $this->status === self::STATUS_ACTIVE;
+    }
+
+    public function isVerified()
+    {
+        return $this->verification_status === self::VERIFICATION_VERIFIED;
+    }
+
+    public function isAvailable()
+    {
+        return $this->availability_status === self::AVAILABILITY_AVAILABLE && $this->isActive();
+    }
+
+    public function updateLocation($latitude, $longitude, $address = null)
+    {
+        $this->update([
+            'current_location_lat' => $latitude,
+            'current_location_lng' => $longitude,
+            'current_address' => $address,
+            'last_location_update' => now(),
+            'last_active' => now()
+        ]);
+    }
+
+    // Override toArray for Firebase sync
+    public function toFirebaseArray()
+    {
+        return [
+            // Required fields
+            'firebase_uid' => $this->firebase_uid ?? '',
+            'name' => $this->name ?? '',
+            'email' => $this->email ?? '',
+            'phone' => $this->phone ?? '',
+            
+            // Status fields
+            'status' => $this->status ?? 'pending',
+            'verification_status' => $this->verification_status ?? 'pending',
+            'availability_status' => $this->availability_status ?? 'offline',
+            
+            // Personal information
+            'date_of_birth' => $this->date_of_birth ? $this->date_of_birth->format('Y-m-d') : '',
+            'gender' => $this->gender ?? '',
+            'address' => $this->address ?? '',
+            'city' => $this->city ?? '',
+            'state' => $this->state ?? '',
+            'postal_code' => $this->postal_code ?? '',
+            'country' => $this->country ?? '',
+            
+            // License information
+            'license_number' => $this->license_number ?? '',
+            'license_expiry' => $this->license_expiry ? $this->license_expiry->format('Y-m-d') : '',
+            'license_class' => $this->license_class ?? '',
+            'license_type' => $this->license_type ?? '',
+            'issuing_state' => $this->issuing_state ?? '',
+            
+            // Performance metrics
+            'rating' => $this->rating ?? 0,
+            'total_rides' => $this->total_rides ?? 0,
+            'completed_rides' => $this->completed_rides ?? 0,
+            'cancelled_rides' => $this->cancelled_rides ?? 0,
+            'total_earnings' => $this->total_earnings ?? 0,
+            'completion_rate' => $this->completion_rate ?? 0,
+            'cancellation_rate' => $this->cancellation_rate ?? 0,
+            
+            // Location data (if applicable)
+            'latitude' => $this->latitude ?? null,
+            'longitude' => $this->longitude ?? null,
+            'location_address' => $this->location_address ?? '',
+            
+            // Timestamps
+            'join_date' => $this->join_date ?? $this->created_at?->format('Y-m-d'),
+            'last_active' => $this->last_active?->toISOString(),
+            'verified_at' => $this->verified_at?->toISOString(),
+            
+            // Firebase metadata
+            'sync_updated_at' => now()->toISOString(),
+            'last_modified_by' => $this->updated_by ?? 'system',
         ];
-
-        return $colors[$this->status ?? self::STATUS_PENDING] ?? 'secondary';
     }
 
-    /**
-     * Get verification status badge color
-     */
-    public function getVerificationColorAttribute(): string
-    {
-        $colors = [
-            self::VERIFICATION_VERIFIED => 'success',
-            self::VERIFICATION_PENDING => 'warning',
-            self::VERIFICATION_REJECTED => 'danger'
-        ];
-
-        return $colors[$this->verification_status ?? self::VERIFICATION_PENDING] ?? 'secondary';
-    }
-
-    /**
-     * Get available driver statuses
-     */
-    public static function getStatuses(): array
+    // Static methods
+    public static function getStatuses()
     {
         return [
             self::STATUS_ACTIVE => 'Active',
@@ -231,10 +385,7 @@ class Driver
         ];
     }
 
-    /**
-     * Get available verification statuses
-     */
-    public static function getVerificationStatuses(): array
+    public static function getVerificationStatuses()
     {
         return [
             self::VERIFICATION_PENDING => 'Pending',
@@ -243,255 +394,12 @@ class Driver
         ];
     }
 
-    /**
-     * Get available availability statuses
-     */
-    public static function getAvailabilityStatuses(): array
+    public static function getAvailabilityStatuses()
     {
         return [
             self::AVAILABILITY_AVAILABLE => 'Available',
             self::AVAILABILITY_BUSY => 'Busy',
             self::AVAILABILITY_OFFLINE => 'Offline'
         ];
-    }
-
-    /**
-     * Format date attributes
-     */
-    public function getFormattedDate(string $attribute): ?string
-    {
-        $value = $this->attributes[$attribute] ?? null;
-        if (!$value) return null;
-
-        try {
-            return Carbon::parse($value)->format('M d, Y');
-        } catch (\Exception $e) {
-            return null;
-        }
-    }
-
-    /**
-     * Format datetime attributes
-     */
-    public function getFormattedDateTime(string $attribute): ?string
-    {
-        $value = $this->attributes[$attribute] ?? null;
-        if (!$value) return null;
-
-        try {
-            return Carbon::parse($value)->format('M d, Y H:i');
-        } catch (\Exception $e) {
-            return null;
-        }
-    }
-
-    /**
-     * Get time ago format for attributes
-     */
-    public function getTimeAgo(string $attribute): ?string
-    {
-        $value = $this->attributes[$attribute] ?? null;
-        if (!$value) return null;
-
-        try {
-            return Carbon::parse($value)->diffForHumans();
-        } catch (\Exception $e) {
-            return null;
-        }
-    }
-
-    /**
-     * Check if license is expired
-     */
-    public function isLicenseExpired(): bool
-    {
-        if (!$this->license_expiry) return false;
-
-        try {
-            return Carbon::parse($this->license_expiry)->isPast();
-        } catch (\Exception $e) {
-            return false;
-        }
-    }
-
-    /**
-     * Check if license expires soon (within 30 days)
-     */
-    public function licenseExpiresSoon(int $days = 30): bool
-    {
-        if (!$this->license_expiry) return false;
-
-        try {
-            return Carbon::parse($this->license_expiry)->isBefore(now()->addDays($days));
-        } catch (\Exception $e) {
-            return false;
-        }
-    }
-
-    /**
-     * Get formatted total earnings
-     */
-    public function getFormattedEarnings(): string
-    {
-        return '' . number_format($this->total_earnings ?? 0, 2);
-    }
-
-    /**
-     * Get formatted rating
-     */
-    public function getFormattedRating(): string
-    {
-        $rating = $this->rating ?? 0;
-        return number_format($rating, 1) . '/5.0';
-    }
-
-    /**
-     * Check if driver has valid location
-     */
-    public function hasValidLocation(): bool
-    {
-        return !empty($this->current_location_lat) && !empty($this->current_location_lng);
-    }
-
-    /**
-     * Get distance from a given location (in km)
-     */
-    public function getDistanceFrom(float $latitude, float $longitude): ?float
-    {
-        if (!$this->hasValidLocation()) {
-            return null;
-        }
-
-        $earthRadius = 6371; // km
-
-        $dLat = deg2rad($latitude - $this->current_location_lat);
-        $dLng = deg2rad($longitude - $this->current_location_lng);
-
-        $a = sin($dLat/2) * sin($dLat/2) +
-             cos(deg2rad($this->current_location_lat)) * cos(deg2rad($latitude)) *
-             sin($dLng/2) * sin($dLng/2);
-
-        $c = 2 * atan2(sqrt($a), sqrt(1-$a));
-
-        return $earthRadius * $c;
-    }
-
-    /**
-     * Update driver location
-     */
-    public function updateLocation(float $latitude, float $longitude, string $address = null): void
-    {
-        $this->current_location_lat = $latitude;
-        $this->current_location_lng = $longitude;
-        $this->last_location_update = now()->toISOString();
-        
-        if ($address) {
-            $this->current_address = $address;
-        }
-        
-        $this->updateLastActive();
-    }
-
-    /**
-     * Update last active timestamp
-     */
-    public function updateLastActive(): void
-    {
-        $this->last_active = now()->toISOString();
-        $this->updated_at = now()->toISOString();
-    }
-
-    /**
-     * Validate driver data
-     */
-    public function validate(): array
-    {
-        $errors = [];
-
-        if (empty($this->firebase_uid)) {
-            $errors[] = 'Firebase UID is required';
-        }
-
-        if (empty($this->name)) {
-            $errors[] = 'Name is required';
-        }
-
-        if (empty($this->email)) {
-            $errors[] = 'Email is required';
-        } elseif (!filter_var($this->email, FILTER_VALIDATE_EMAIL)) {
-            $errors[] = 'Email must be a valid email address';
-        }
-
-        if (empty($this->license_number)) {
-            $errors[] = 'License number is required';
-        }
-
-        if ($this->license_expiry && Carbon::parse($this->license_expiry)->isPast()) {
-            $errors[] = 'License expiry date must be in the future';
-        }
-
-        if ($this->date_of_birth) {
-            $age = Carbon::parse($this->date_of_birth)->age;
-            if ($age < 18) {
-                $errors[] = 'Driver must be at least 18 years old';
-            }
-        }
-
-        return $errors;
-    }
-
-    /**
-     * Prepare data for Firestore storage
-     */
-    public function prepareForFirestore(): array
-    {
-        $data = $this->attributes;
-        
-        // Convert numeric values
-        if (isset($data['rating'])) {
-            $data['rating'] = (float) $data['rating'];
-        }
-        
-        if (isset($data['total_rides'])) {
-            $data['total_rides'] = (int) $data['total_rides'];
-        }
-        
-        if (isset($data['completed_rides'])) {
-            $data['completed_rides'] = (int) $data['completed_rides'];
-        }
-        
-        if (isset($data['cancelled_rides'])) {
-            $data['cancelled_rides'] = (int) $data['cancelled_rides'];
-        }
-        
-        if (isset($data['total_earnings'])) {
-            $data['total_earnings'] = (float) $data['total_earnings'];
-        }
-        
-        if (isset($data['current_location_lat'])) {
-            $data['current_location_lat'] = (float) $data['current_location_lat'];
-        }
-        
-        if (isset($data['current_location_lng'])) {
-            $data['current_location_lng'] = (float) $data['current_location_lng'];
-        }
-        
-        // Ensure required fields have defaults
-        $data['status'] = $data['status'] ?? self::STATUS_PENDING;
-        $data['verification_status'] = $data['verification_status'] ?? self::VERIFICATION_PENDING;
-        $data['availability_status'] = $data['availability_status'] ?? self::AVAILABILITY_OFFLINE;
-        $data['rating'] = $data['rating'] ?? 5.0;
-        $data['total_rides'] = $data['total_rides'] ?? 0;
-        $data['completed_rides'] = $data['completed_rides'] ?? 0;
-        $data['cancelled_rides'] = $data['cancelled_rides'] ?? 0;
-        $data['total_earnings'] = $data['total_earnings'] ?? 0.0;
-        
-        // Set timestamps
-        if (!isset($data['created_at'])) {
-            $data['created_at'] = now()->toISOString();
-        }
-        $data['updated_at'] = now()->toISOString();
-        
-        return $data;
     }
 }

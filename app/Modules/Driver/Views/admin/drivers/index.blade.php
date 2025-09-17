@@ -172,184 +172,195 @@
                 </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
-                @foreach($drivers as $driver)
-                @php
-                    $driverId = $driver['firebase_uid'];
-                    $driverName = $driver['name'];
-                    $driverEmail = $driver['email'];
-                    $driverPhone = $driver['phone'];
-                    $driverStatus = $driver['status'];
-                    $verificationStatus = $driver['verification_status'];
-                    $availabilityStatus = $driver['availability_status'];
-                    $rating = $driver['rating'] ?? 0;
-                    $totalRides = $driver['total_rides'] ?? 0;
-                    $totalEarnings = $driver['total_earnings'] ?? 0;
-                    $city = $driver['city'];
-                    $state = $driver['state'];
-                    
-                    $joinedAt = null;
-                    $joinedDisplay = 'Unknown';
-                    $joinedHuman = 'Date not available';
-                    
-                    if (!empty($driver['join_date'])) {
-                        try {
-                            $joinedAt = \Carbon\Carbon::parse($driver['join_date']);
-                            $joinedDisplay = $joinedAt->format('M d, Y');
-                            $joinedHuman = $joinedAt->diffForHumans();
-                        } catch (\Exception $e) {
-                            Log::debug('Date parsing error for driver', [
-                                'driver_id' => $driverId,
-                                'join_date' => $driver['join_date'],
-                                'error' => $e->getMessage()
-                            ]);
-                        }
-                    }
-                    
-                    $displayName = ($driverName !== 'Unknown Driver') ? $driverName : $driverEmail;
-                @endphp
-                <tr data-driver-id="{{ $driverId }}" class="hover:bg-gray-50">
-                    <td class="px-6 py-4">
-                        <input type="checkbox" class="driver-checkbox rounded border-gray-300 text-primary focus:ring-primary" 
-                               value="{{ $driverId }}" onchange="updateBulkActions()">
-                    </td>
-                    <td class="px-6 py-4">
-                        <div class="flex items-center">
-                            @if(!empty($driver['photo_url']))
-                                <img src="{{ $driver['photo_url'] }}" alt="{{ $driverName }}" 
-                                     class="w-10 h-10 rounded-full mr-3">
-                            @else
-                                <div class="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-white font-medium mr-3">
-                                    {{ strtoupper(substr($driverName, 0, 1)) }}
-                                </div>
-                            @endif
-                            <div>
-                                <div class="font-medium text-gray-900">{{ $driverName }}</div>
-                                <div class="text-sm text-gray-500">{{ $driverEmail }}</div>
-                                <div class="text-xs text-gray-400">
-                                    ID: {{ substr($driverId, 0, 12) }}{{ strlen($driverId) > 12 ? '...' : '' }}
-                                </div>
-                            </div>
-                        </div>
-                    </td>
-                    <td class="px-6 py-4">
-                        <div class="text-sm text-gray-900">{{ $driverEmail }}</div>
-                        @if($driverPhone)
-                            <div class="text-sm text-gray-500">{{ $driverPhone }}</div>
-                        @else
-                            <div class="text-sm text-gray-400">No phone</div>
-                        @endif
-                        @if(!empty($driver['license_number']))
-                            <div class="text-xs text-gray-500">License: {{ $driver['license_number'] }}</div>
-                        @endif
-                    </td>
-                    <td class="px-6 py-4">
-                        <div class="flex flex-col gap-1">
-                            <!-- Driver Status -->
-                            @if($driverStatus === 'active')
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                    <i class="fas fa-check-circle mr-1"></i>Active
-                                </span>
-                            @elseif($driverStatus === 'suspended')
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                                    <i class="fas fa-pause-circle mr-1"></i>Suspended
-                                </span>
-                            @elseif($driverStatus === 'pending')
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                    <i class="fas fa-clock mr-1"></i>Pending
-                                </span>
-                            @else
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                    <i class="fas fa-times-circle mr-1"></i>Inactive
-                                </span>
-                            @endif
-                            
-                            <!-- Verification Status -->
-                            @if($verificationStatus === 'verified')
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                    <i class="fas fa-shield-check mr-1"></i>Verified
-                                </span>
-                            @elseif($verificationStatus === 'rejected')
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                    <i class="fas fa-shield-times mr-1"></i>Rejected
-                                </span>
-                            @else
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                    <i class="fas fa-shield-question mr-1"></i>Pending
-                                </span>
-                            @endif
-                            
-                            <!-- Availability Status -->
-                            @if($availabilityStatus === 'available')
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                    <i class="fas fa-circle mr-1"></i>Available
-                                </span>
-                            @elseif($availabilityStatus === 'busy')
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                    <i class="fas fa-circle mr-1"></i>Busy
-                                </span>
-                            @else
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                    <i class="fas fa-circle mr-1"></i>Offline
-                                </span>
-                            @endif
-                        </div>
-                    </td>
-                    <td class="px-6 py-4 text-sm">
-                        <div class="text-gray-900">
-                            <i class="fas fa-star text-yellow-400 mr-1"></i>{{ number_format($rating, 1) }}
-                        </div>
-                        <div class="text-gray-500">{{ $totalRides }} rides</div>
-                        <div class="text-gray-500">${{ number_format($totalEarnings, 2) }}</div>
-                    </td>
-                    <td class="px-6 py-4 text-sm">
-                        @if($city || $state)
-                            <div class="text-gray-900">{{ $city }}</div>
-                            @if($state)
-                                <div class="text-gray-500">{{ $state }}</div>
-                            @endif
-                        @else
-                            <div class="text-gray-400">No location</div>
-                        @endif
-                    </td>
-                    <td class="px-6 py-4 text-sm text-gray-900">
-                        <div>{{ $joinedDisplay }}</div>
-                        <div class="text-xs text-gray-500">{{ $joinedHuman }}</div>
-                    </td>
-                    <td class="px-6 py-4">
-                        <div class="flex items-center gap-2">
-                            <a href="{{ route('admin.drivers.show', $driverId) }}" 
-                               class="text-primary hover:text-blue-700 p-1" title="View Details">
-                                <i class="fas fa-eye"></i>
-                            </a>
-                            <a href="{{ route('admin.drivers.edit', $driverId) }}" 
-                               class="text-green-600 hover:text-green-800 p-1" title="Edit Driver">
-                                <i class="fas fa-edit"></i>
-                            </a>
-                            @if($driverStatus === 'active')
-                                <button onclick="toggleDriverStatus('{{ $driverId }}', 'deactivate')" 
-                                        class="text-yellow-600 hover:text-yellow-800 p-1" title="Deactivate Driver">
-                                    <i class="fas fa-ban"></i>
-                                </button>
-                            @else
-                                <button onclick="toggleDriverStatus('{{ $driverId }}', 'activate')" 
-                                        class="text-green-600 hover:text-green-800 p-1" title="Activate Driver">
-                                    <i class="fas fa-check-circle"></i>
-                                </button>
-                            @endif
-                            @if($verificationStatus !== 'verified')
-                                <button onclick="toggleDriverStatus('{{ $driverId }}', 'verify')" 
-                                        class="text-blue-600 hover:text-blue-800 p-1" title="Verify Driver">
-                                    <i class="fas fa-shield-check"></i>
-                                </button>
-                            @endif
-                            <button onclick="deleteDriver('{{ $driverId }}', '{{ addslashes($displayName) }}')" 
-                                    class="text-red-600 hover:text-red-800 p-1" title="Delete Driver">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-                @endforeach
+              @foreach($drivers as $driver)
+@php
+    // Handle both array and object access patterns
+    $driverId = is_array($driver) ? $driver['firebase_uid'] : $driver->firebase_uid;
+    $driverName = is_array($driver) ? ($driver['name'] ?? 'Unknown Driver') : ($driver->name ?? 'Unknown Driver');
+    $driverEmail = is_array($driver) ? ($driver['email'] ?? '') : ($driver->email ?? '');
+    $driverPhone = is_array($driver) ? ($driver['phone'] ?? '') : ($driver->phone ?? '');
+    $driverStatus = is_array($driver) ? ($driver['status'] ?? 'pending') : ($driver->status ?? 'pending');
+    $verificationStatus = is_array($driver) ? ($driver['verification_status'] ?? 'pending') : ($driver->verification_status ?? 'pending');
+    $availabilityStatus = is_array($driver) ? ($driver['availability_status'] ?? 'offline') : ($driver->availability_status ?? 'offline');
+    $rating = is_array($driver) ? ($driver['rating'] ?? 0) : ($driver->rating ?? 0);
+    $totalRides = is_array($driver) ? ($driver['total_rides'] ?? 0) : ($driver->total_rides ?? 0);
+    $totalEarnings = is_array($driver) ? ($driver['total_earnings'] ?? 0) : ($driver->total_earnings ?? 0);
+    $city = is_array($driver) ? ($driver['city'] ?? '') : ($driver->city ?? '');
+    $state = is_array($driver) ? ($driver['state'] ?? '') : ($driver->state ?? '');
+    $photoUrl = is_array($driver) ? ($driver['photo_url'] ?? '') : ($driver->photo_url ?? '');
+    $licenseNumber = is_array($driver) ? ($driver['license_number'] ?? '') : ($driver->license_number ?? '');
+    
+    $joinedAt = null;
+    $joinedDisplay = 'Unknown';
+    $joinedHuman = 'Date not available';
+    
+    // Handle join date - try multiple possible field names
+    $joinDate = null;
+    if (is_array($driver)) {
+        $joinDate = $driver['join_date'] ?? $driver['created_at'] ?? null;
+    } else {
+        $joinDate = $driver->join_date ?? $driver->created_at ?? null;
+    }
+    
+    if (!empty($joinDate)) {
+        try {
+            $joinedAt = \Carbon\Carbon::parse($joinDate);
+            $joinedDisplay = $joinedAt->format('M d, Y');
+            $joinedHuman = $joinedAt->diffForHumans();
+        } catch (\Exception $e) {
+            Log::debug('Date parsing error for driver', [
+                'driver_id' => $driverId,
+                'join_date' => $joinDate,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
+    $displayName = ($driverName !== 'Unknown Driver') ? $driverName : $driverEmail;
+@endphp
+<tr data-driver-id="{{ $driverId }}" class="hover:bg-gray-50">
+    <td class="px-6 py-4">
+        <input type="checkbox" class="driver-checkbox rounded border-gray-300 text-primary focus:ring-primary" 
+               value="{{ $driverId }}" onchange="updateBulkActions()">
+    </td>
+    <td class="px-6 py-4">
+        <div class="flex items-center">
+            @if(!empty($photoUrl))
+                <img src="{{ $photoUrl }}" alt="{{ $driverName }}" 
+                     class="w-10 h-10 rounded-full mr-3">
+            @else
+                <div class="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-white font-medium mr-3">
+                    {{ strtoupper(substr($driverName, 0, 1)) }}
+                </div>
+            @endif
+            <div>
+                <div class="font-medium text-gray-900">{{ $driverName }}</div>
+                <div class="text-sm text-gray-500">{{ $driverEmail }}</div>
+                <div class="text-xs text-gray-400">
+                    ID: {{ substr($driverId, 0, 12) }}{{ strlen($driverId) > 12 ? '...' : '' }}
+                </div>
+            </div>
+        </div>
+    </td>
+    <td class="px-6 py-4">
+        <div class="text-sm text-gray-900">{{ $driverEmail }}</div>
+        @if($driverPhone)
+            <div class="text-sm text-gray-500">{{ $driverPhone }}</div>
+        @else
+            <div class="text-sm text-gray-400">No phone</div>
+        @endif
+        @if(!empty($licenseNumber))
+            <div class="text-xs text-gray-500">License: {{ $licenseNumber }}</div>
+        @endif
+    </td>
+    <td class="px-6 py-4">
+        <div class="flex flex-col gap-1">
+            <!-- Driver Status -->
+            @if($driverStatus === 'active')
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    <i class="fas fa-check-circle mr-1"></i>Active
+                </span>
+            @elseif($driverStatus === 'suspended')
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                    <i class="fas fa-pause-circle mr-1"></i>Suspended
+                </span>
+            @elseif($driverStatus === 'pending')
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                    <i class="fas fa-clock mr-1"></i>Pending
+                </span>
+            @else
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                    <i class="fas fa-times-circle mr-1"></i>Inactive
+                </span>
+            @endif
+            
+            <!-- Verification Status -->
+            @if($verificationStatus === 'verified')
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    <i class="fas fa-shield-check mr-1"></i>Verified
+                </span>
+            @elseif($verificationStatus === 'rejected')
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                    <i class="fas fa-shield-times mr-1"></i>Rejected
+                </span>
+            @else
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                    <i class="fas fa-shield-question mr-1"></i>Pending
+                </span>
+            @endif
+            
+            <!-- Availability Status -->
+            @if($availabilityStatus === 'available')
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    <i class="fas fa-circle mr-1"></i>Available
+                </span>
+            @elseif($availabilityStatus === 'busy')
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                    <i class="fas fa-circle mr-1"></i>Busy
+                </span>
+            @else
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                    <i class="fas fa-circle mr-1"></i>Offline
+                </span>
+            @endif
+        </div>
+    </td>
+    <td class="px-6 py-4 text-sm">
+        <div class="text-gray-900">
+            <i class="fas fa-star text-yellow-400 mr-1"></i>{{ number_format($rating, 1) }}
+        </div>
+        <div class="text-gray-500">{{ $totalRides }} rides</div>
+        <div class="text-gray-500">${{ number_format($totalEarnings, 2) }}</div>
+    </td>
+    <td class="px-6 py-4 text-sm">
+        @if($city || $state)
+            <div class="text-gray-900">{{ $city }}</div>
+            @if($state)
+                <div class="text-gray-500">{{ $state }}</div>
+            @endif
+        @else
+            <div class="text-gray-400">No location</div>
+        @endif
+    </td>
+    <td class="px-6 py-4 text-sm text-gray-900">
+        <div>{{ $joinedDisplay }}</div>
+        <div class="text-xs text-gray-500">{{ $joinedHuman }}</div>
+    </td>
+    <td class="px-6 py-4">
+        <div class="flex items-center gap-2">
+            <a href="{{ route('admin.drivers.show', $driverId) }}" 
+               class="text-primary hover:text-blue-700 p-1" title="View Details">
+                <i class="fas fa-eye"></i>
+            </a>
+            <a href="{{ route('admin.drivers.edit', $driverId) }}" 
+               class="text-green-600 hover:text-green-800 p-1" title="Edit Driver">
+                <i class="fas fa-edit"></i>
+            </a>
+            @if($driverStatus === 'active')
+                <button onclick="toggleDriverStatus('{{ $driverId }}', 'deactivate')" 
+                        class="text-yellow-600 hover:text-yellow-800 p-1" title="Deactivate Driver">
+                    <i class="fas fa-ban"></i>
+                </button>
+            @else
+                <button onclick="toggleDriverStatus('{{ $driverId }}', 'activate')" 
+                        class="text-green-600 hover:text-green-800 p-1" title="Activate Driver">
+                    <i class="fas fa-check-circle"></i>
+                </button>
+            @endif
+            @if($verificationStatus !== 'verified')
+                <button onclick="toggleDriverStatus('{{ $driverId }}', 'verify')" 
+                        class="text-blue-600 hover:text-blue-800 p-1" title="Verify Driver">
+                    <i class="fas fa-shield-check"></i>
+                </button>
+            @endif
+            <button onclick="deleteDriver('{{ $driverId }}', '{{ addslashes($displayName) }}')" 
+                    class="text-red-600 hover:text-red-800 p-1" title="Delete Driver">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+    </td>
+</tr>
+@endforeach
             </tbody>
         </table>
     </div>

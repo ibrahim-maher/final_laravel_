@@ -38,14 +38,20 @@ class ModuleServiceProvider extends ServiceProvider
             'User' => 'user',
             'Document' => 'document',
             'Core' => 'core',
-            'Driver' => 'driver'
+            'Driver' => 'driver',
+            'TaxSetting' => 'tax-setting', // Tax Setting module
+            'Commission' => 'commission',
+            'Coupon' => 'coupon',
+            'Page' => 'page',
+
+            'Foq' => 'foq'
         ];
 
         foreach ($modules as $module => $prefix) {
             $routePath = app_path("Modules/{$module}/routes.php");
             if (file_exists($routePath)) {
                 Log::debug("Loading routes for module: {$module} with prefix: {$prefix}");
-                
+
                 // Apply web middleware group to ensure session works
                 Route::group([
                     'prefix' => $prefix,
@@ -65,8 +71,8 @@ class ModuleServiceProvider extends ServiceProvider
      */
     protected function loadModuleViews(): void
     {
-        $modules = ['Auth', 'Admin', 'User', 'Document', 'Core','Driver'];
-        
+        $modules = ['Auth', 'Admin', 'User', 'Document', 'Core', 'Driver', 'Coupon', 'Foq', 'TaxSetting', 'Commission', 'Page'];
+
         foreach ($modules as $module) {
             $viewPath = app_path("Modules/{$module}/Views");
             if (is_dir($viewPath)) {

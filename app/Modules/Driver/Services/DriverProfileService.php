@@ -141,33 +141,48 @@ class DriverProfileService extends BaseService
     /**
      * Update driver
      */
-    public function updateDriver(string $firebaseUid, array $driverData): bool
-    {
-        try {
-            Log::info('Updating driver', ['firebase_uid' => $firebaseUid, 'fields' => array_keys($driverData)]);
-            
-            $result = $this->updateDocument($firebaseUid, $driverData);
-            
-            if ($result) {
-                Log::info('Driver updated successfully', ['firebase_uid' => $firebaseUid]);
-                
-                // Create activity
-                $this->createDriverActivity($firebaseUid, DriverActivity::TYPE_PROFILE_UPDATE, [
-                    'title' => 'Profile Updated',
-                    'description' => 'Driver profile information has been updated.'
-                ]);
-            }
-            
-            return $result;
-        } catch (\Exception $e) {
-            Log::error('Error updating driver: ' . $e->getMessage(), [
-                'firebase_uid' => $firebaseUid,
-                'driver_data' => $driverData,
-                'trace' => $e->getTraceAsString()
+ public function updateDriver(string $firebaseUid, array $driverData): bool
+{
+    try {
+        Log::info('DriverProfileService: updateDriver called', [
+            'firebase_uid' => $firebaseUid,
+            'fields' => array_keys($driverData)
+        ]);
+        
+       
+        $result = $this->updateDocument($firebaseUid, $driverData);
+        
+        if ($result) {
+            Log::info('DriverProfileService: Update successful', [
+                'firebase_uid' => $firebaseUid
             ]);
-            return false;
+            
+            // Create activity
+            $this->createDriverActivity($firebaseUid, DriverActivity::TYPE_PROFILE_UPDATE, [
+                'title' => 'Profile Updated',
+                'description' => 'Driver profile information has been updated.'
+            ]);
+        } else {
+            Log::error('DriverProfileService: Update failed', [
+                'firebase_uid' => $firebaseUid
+            ]);
         }
+        
+        return $result;
+    } catch (\Exception $e) {
+        Log::error('DriverProfileService: Error in updateDriver', [
+            'firebase_uid' => $firebaseUid,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        return false;
     }
+}
+
+
+
+
+
 
     /**
      * Delete driver
@@ -196,35 +211,66 @@ class DriverProfileService extends BaseService
     /**
      * Update driver status
      */
-    public function updateDriverStatus(string $firebaseUid, string $status): bool
-    {
-        try {
-            Log::info('Updating driver status', ['firebase_uid' => $firebaseUid, 'status' => $status]);
-            
-            $updateData = ['status' => $status];
-            
-            if ($status === Driver::STATUS_ACTIVE) {
-                $updateData['verification_date'] = now()->toDateTimeString();
-            }
-            
-            $result = $this->updateDocument($firebaseUid, $updateData);
-            
-            if ($result) {
-                // Create activity
-                $this->createDriverActivity($firebaseUid, DriverActivity::TYPE_STATUS_CHANGE, [
-                    'title' => 'Status Changed',
-                    'description' => "Driver status changed to: " . ucfirst($status),
-                    'metadata' => ['new_status' => $status]
-                ]);
-            }
-            
-            return $result;
-        } catch (\Exception $e) {
-            Log::error('Error updating driver status: ' . $e->getMessage());
-            return false;
+   public function updateDriverStatus(string $firebaseUid, string $status): bool
+{
+    try {
+        Log::info('DriverProfileService: Updating driver status - START', [
+            'firebase_uid' => $firebaseUid, 
+            'status' => $status,
+            'timestamp' => now()->toDateTimeString()
+        ]);
+        
+        $updateData = ['status' => $status];
+        
+        if ($status === Driver::STATUS_ACTIVE) {
+            $updateData['verification_date'] = now()->toDateTimeString();
+            Log::info('Adding verification_date for active status', ['firebase_uid' => $firebaseUid]);
         }
+        
+        Log::info('About to update document in Firestore', [
+            'firebase_uid' => $firebaseUid,
+            'update_data' => $updateData
+        ]);
+        
+        $result = $this->updateDocument($firebaseUid, $updateData);
+        
+        Log::info('Firestore update result', [
+            'firebase_uid' => $firebaseUid,
+            'result' => $result ? 'success' : 'failed'
+        ]);
+        
+        if ($result) {
+            // Create activity
+            Log::info('Creating driver activity for status change', ['firebase_uid' => $firebaseUid]);
+            
+            $this->createDriverActivity($firebaseUid, DriverActivity::TYPE_STATUS_CHANGE, [
+                'title' => 'Status Changed',
+                'description' => "Driver status changed to: " . ucfirst($status),
+                'metadata' => ['new_status' => $status]
+            ]);
+            
+            Log::info('DriverProfileService: Driver status updated successfully', [
+                'firebase_uid' => $firebaseUid,
+                'new_status' => $status
+            ]);
+        } else {
+            Log::error('DriverProfileService: Failed to update driver status in Firestore', [
+                'firebase_uid' => $firebaseUid,
+                'status' => $status
+            ]);
+        }
+        
+        return $result;
+    } catch (\Exception $e) {
+        Log::error('DriverProfileService: Error updating driver status', [
+            'firebase_uid' => $firebaseUid,
+            'status' => $status,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        return false;
     }
-
+}
     /**
      * Update driver verification status
      */

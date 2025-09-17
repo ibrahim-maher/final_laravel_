@@ -71,6 +71,78 @@
     </script>
     
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    
+    body {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #f1f5f9;
+        border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #003366, #FFA500);
+        border-radius: 10px;
+    }
+    
+    .sidebar-nav-link {
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .sidebar-nav-link::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+        transition: left 0.5s;
+    }
+    
+    .sidebar-nav-link:hover::before {
+        left: 100%;
+    }
+    
+    /* Sidebar scrolling fixes */
+    #adminSidebar {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    #adminSidebar nav {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0; /* Critical for flexbox scrolling */
+    }
+    
+    /* Custom scrollbar for sidebar */
+    #adminSidebar nav::-webkit-scrollbar {
+        width: 6px;
+    }
+    
+    #adminSidebar nav::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+    }
+    
+    #adminSidebar nav::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 3px;
+    }
+    
+    #adminSidebar nav::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.5);
+    }
+
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
         
         body {

@@ -103,6 +103,15 @@ return [
     |
     */
 
+    'firestore-sync' => [
+    'driver' => 'redis',
+    'connection' => 'default',
+    'queue' => 'firestore-sync',
+    'retry_after' => 90,
+    'block_for' => null,
+    'after_commit' => false,
+],
+
     'failed' => [
         'driver' => env('QUEUE_FAILED_DRIVER', 'database-uuids'),
         'database' => env('DB_CONNECTION', 'sqlite'),

@@ -3,6 +3,8 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\FirebaseAuthController;
 
+require __DIR__ . '/complaint.php';
+
 Route::get('/', function () {
     return redirect()->route('login');
 });
@@ -15,7 +17,6 @@ Route::post('/register', [FirebaseAuthController::class, 'register']);
 
 Route::post('/logout', [FirebaseAuthController::class, 'logout'])->name('logout');
 
-Route::get('/dashboard', [FirebaseAuthController::class, 'dashboard'])->name('dashboard');
 Route::get('/user/profile', function () {
     if (!session('firebase_user')) {
         return redirect()->route('login');

@@ -54,13 +54,13 @@
                 </div>
                 <div class="w-16 h-1 bg-gray-200"></div>
                 <div class="flex items-center">
-                    <div class="w-8 h-8 bg-gray-200 text-gray-600 rounded-full flex items-center justify-center text-sm font-medium">2</div>
-                    <span class="ml-2 text-sm font-medium text-gray-500">Vehicle</span>
+                    <div class="w-8 h-8 bg-gray-200 text-gray-600 rounded-full flex items-center justify-center text-sm font-medium step-2">2</div>
+                    <span class="ml-2 text-sm font-medium text-gray-500 step-2-text">Vehicle</span>
                 </div>
                 <div class="w-16 h-1 bg-gray-200"></div>
                 <div class="flex items-center">
-                    <div class="w-8 h-8 bg-gray-200 text-gray-600 rounded-full flex items-center justify-center text-sm font-medium">3</div>
-                    <span class="ml-2 text-sm font-medium text-gray-500">Documents</span>
+                    <div class="w-8 h-8 bg-gray-200 text-gray-600 rounded-full flex items-center justify-center text-sm font-medium step-3">3</div>
+                    <span class="ml-2 text-sm font-medium text-gray-500 step-3-text">Documents</span>
                 </div>
             </div>
         </div>
@@ -971,20 +971,20 @@
         
         // Progress step management
         function updateProgressStep(step, active) {
-            const steps = document.querySelectorAll('.w-8.h-8');
-            const stepTexts = document.querySelectorAll('.text-sm.font-medium');
+            const stepCircle = document.querySelector(`.step-${step}`);
+            const stepText = document.querySelector(`.step-${step}-text`);
             
-            if (steps[step - 1] && stepTexts[step - 1]) {
+            if (stepCircle && stepText) {
                 if (active) {
-                    steps[step - 1].classList.remove('bg-gray-200', 'text-gray-600');
-                    steps[step - 1].classList.add('bg-primary', 'text-white');
-                    stepTexts[step - 1].classList.remove('text-gray-500');
-                    stepTexts[step - 1].classList.add('text-gray-900');
+                    stepCircle.classList.remove('bg-gray-200', 'text-gray-600');
+                    stepCircle.classList.add('bg-primary', 'text-white');
+                    stepText.classList.remove('text-gray-500');
+                    stepText.classList.add('text-gray-900');
                 } else {
-                    steps[step - 1].classList.remove('bg-primary', 'text-white');
-                    steps[step - 1].classList.add('bg-gray-200', 'text-gray-600');
-                    stepTexts[step - 1].classList.remove('text-gray-900');
-                    stepTexts[step - 1].classList.add('text-gray-500');
+                    stepCircle.classList.remove('bg-primary', 'text-white');
+                    stepCircle.classList.add('bg-gray-200', 'text-gray-600');
+                    stepText.classList.remove('text-gray-900');
+                    stepText.classList.add('text-gray-500');
                 }
             }
         }

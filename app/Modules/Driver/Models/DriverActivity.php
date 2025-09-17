@@ -2,13 +2,15 @@
 
 namespace App\Modules\Driver\Models;
 
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Traits\FirebaseSyncable;
 use Carbon\Carbon;
 
-class DriverActivity
+class DriverActivity extends Model
 {
-    // Activity data fields
-    protected $attributes = [];
-    
+    use HasFactory, FirebaseSyncable;
+
     protected $fillable = [
         'driver_firebase_uid',
         'activity_type',
@@ -25,13 +27,33 @@ class DriverActivity
         'app_version',
         'status',
         'priority',
+        'is_read',
         'read_at',
         'archived_at',
         'related_entity_type',
         'related_entity_id',
-        'created_at',
-        'updated_at'
+        'vehicle_id',
+        'ride_id',
+        'document_id',
+        'created_by',
+        'firebase_synced',
+        'firebase_synced_at'
     ];
+
+    protected $casts = [
+        'metadata' => 'array',
+        'location_latitude' => 'decimal:8',
+        'location_longitude' => 'decimal:8',
+        'is_read' => 'boolean',
+        'read_at' => 'datetime',
+        'archived_at' => 'datetime',
+        'firebase_synced' => 'boolean',
+        'firebase_synced_at' => 'datetime',
+    ];
+
+    // Firebase sync configuration
+    protected $firebaseCollection = 'driver_activities';
+    protected $firebaseKey = 'id';
 
     // Activity type constants
     const TYPE_LOGIN = 'login';
@@ -46,12 +68,20 @@ class DriverActivity
     const TYPE_RIDE_CANCEL = 'ride_cancel';
     const TYPE_PROFILE_UPDATE = 'profile_update';
     const TYPE_DOCUMENT_UPLOAD = 'document_upload';
+    const TYPE_DOCUMENT_UPDATE = 'document_update';
     const TYPE_VEHICLE_UPDATE = 'vehicle_update';
+    const TYPE_VEHICLE_ADD = 'vehicle_add';
+    const TYPE_VEHICLE_REMOVE = 'vehicle_remove';
     const TYPE_PAYMENT_UPDATE = 'payment_update';
     const TYPE_RATING_RECEIVED = 'rating_received';
     const TYPE_EARNINGS_UPDATE = 'earnings_update';
+    const TYPE_VERIFICATION_UPDATE = 'verification_update';
     const TYPE_VIOLATION = 'violation';
     const TYPE_SYSTEM_NOTIFICATION = 'system_notification';
+    const TYPE_MAINTENANCE_REMINDER = 'maintenance_reminder';
+    const TYPE_INSURANCE_EXPIRY = 'insurance_expiry';
+    const TYPE_REGISTRATION_EXPIRY = 'registration_expiry';
+    const TYPE_LICENSE_EXPIRY = 'license_expiry';
 
     // Activity category constants
     const CATEGORY_AUTH = 'authentication';
@@ -62,6 +92,10 @@ class DriverActivity
     const CATEGORY_LOCATION = 'location';
     const CATEGORY_SYSTEM = 'system';
     const CATEGORY_SECURITY = 'security';
+    const CATEGORY_DOCUMENT = 'document';
+    const CATEGORY_VERIFICATION = 'verification';
+    const CATEGORY_MAINTENANCE = 'maintenance';
+    const CATEGORY_EXPIRY = 'expiry';
 
     // Priority constants
     const PRIORITY_LOW = 'low';
@@ -74,232 +108,266 @@ class DriverActivity
     const STATUS_READ = 'read';
     const STATUS_ARCHIVED = 'archived';
 
-    /**
-     * Constructor
-     */
-    public function __construct(array $data = [])
+    // Relationships
+    public function driver()
     {
-        $this->attributes = $data;
+        return $this->belongsTo(Driver::class, 'driver_firebase_uid', 'firebase_uid');
     }
 
-    /**
-     * Get attribute value
-     */
-    public function __get($key)
+    public function vehicle()
     {
-        return $this->attributes[$key] ?? null;
+        return $this->belongsTo(Vehicle::class, 'vehicle_id');
     }
 
-    /**
-     * Set attribute value
-     */
-    public function __set($key, $value)
+    public function ride()
     {
-        $this->attributes[$key] = $value;
+        return $this->belongsTo(Ride::class, 'ride_id');
     }
 
-    /**
-     * Check if attribute exists
-     */
-    public function __isset($key)
+    public function document()
     {
-        return isset($this->attributes[$key]);
+        return $this->belongsTo(DriverDocument::class, 'document_id');
     }
 
-    /**
-     * Convert to array
-     */
-    public function toArray(): array
+    // Scopes
+    public function scopeUnread($query)
     {
-        return $this->attributes;
+        return $query->where('is_read', false);
     }
 
-    /**
-     * Create instance from Firestore data
-     */
-    public static function fromFirestore(array $data): self
+    public function scopeActive($query)
     {
-        return new static($data);
+        return $query->where('status', self::STATUS_ACTIVE);
     }
 
-    /**
-     * Check if activity is read
-     */
-    public function isRead(): bool
+    public function scopeHighPriority($query)
     {
-        return !is_null($this->read_at);
+        return $query->whereIn('priority', [self::PRIORITY_HIGH, self::PRIORITY_URGENT]);
     }
 
-    /**
-     * Check if activity is archived
-     */
-    public function isArchived(): bool
+    public function scopeByType($query, $type)
     {
-        return !is_null($this->archived_at);
+        return $query->where('activity_type', $type);
     }
 
-    /**
-     * Mark activity as read
-     */
-    public function markAsRead(): void
+    public function scopeByCategory($query, $category)
     {
-        $this->read_at = now()->toISOString();
-        $this->status = self::STATUS_READ;
-        $this->updated_at = now()->toISOString();
+        return $query->where('activity_category', $category);
     }
 
-    /**
-     * Archive activity
-     */
-    public function archive(): void
+    public function scopeByPriority($query, $priority)
     {
-        $this->archived_at = now()->toISOString();
-        $this->status = self::STATUS_ARCHIVED;
-        $this->updated_at = now()->toISOString();
+        return $query->where('priority', $priority);
     }
 
-    /**
-     * Get activity age in human readable format
-     */
-    public function getAgeAttribute(): string
+    public function scopeRecent($query, $days = 30)
     {
-        try {
-            return Carbon::parse($this->created_at)->diffForHumans();
-        } catch (\Exception $e) {
-            return 'Unknown';
+        return $query->where('created_at', '>=', now()->subDays($days));
+    }
+
+    public function scopeToday($query)
+    {
+        return $query->whereDate('created_at', today());
+    }
+
+    public function scopeThisWeek($query)
+    {
+        return $query->whereBetween('created_at', [now()->startOfWeek(), now()->endOfWeek()]);
+    }
+
+    public function scopeThisMonth($query)
+    {
+        return $query->whereBetween('created_at', [now()->startOfMonth(), now()->endOfMonth()]);
+    }
+
+    public function scopeUnsynced($query)
+    {
+        return $query->where('firebase_synced', false);
+    }
+
+    public function scopeForVehicle($query, $vehicleId)
+    {
+        return $query->where('vehicle_id', $vehicleId);
+    }
+
+    public function scopeForRide($query, $rideId)
+    {
+        return $query->where('ride_id', $rideId);
+    }
+
+    public function scopeForDocument($query, $documentId)
+    {
+        return $query->where('document_id', $documentId);
+    }
+
+    public function scopeDateRange($query, $startDate, $endDate)
+    {
+        return $query->whereBetween('created_at', [$startDate, $endDate]);
+    }
+
+    // Accessors
+    public function getPriorityBadgeClassAttribute()
+    {
+        $classes = [
+            self::PRIORITY_LOW => 'badge-secondary',
+            self::PRIORITY_NORMAL => 'badge-info',
+            self::PRIORITY_HIGH => 'badge-warning',
+            self::PRIORITY_URGENT => 'badge-danger'
+        ];
+
+        return $classes[$this->priority] ?? 'badge-secondary';
+    }
+
+    public function getCategoryBadgeClassAttribute()
+    {
+        $classes = [
+            self::CATEGORY_AUTH => 'badge-primary',
+            self::CATEGORY_RIDE => 'badge-success',
+            self::CATEGORY_PROFILE => 'badge-info',
+            self::CATEGORY_VEHICLE => 'badge-warning',
+            self::CATEGORY_PAYMENT => 'badge-success',
+            self::CATEGORY_LOCATION => 'badge-secondary',
+            self::CATEGORY_SYSTEM => 'badge-dark',
+            self::CATEGORY_SECURITY => 'badge-danger',
+            self::CATEGORY_DOCUMENT => 'badge-primary',
+            self::CATEGORY_VERIFICATION => 'badge-warning',
+            self::CATEGORY_MAINTENANCE => 'badge-info',
+            self::CATEGORY_EXPIRY => 'badge-danger'
+        ];
+
+        return $classes[$this->activity_category] ?? 'badge-secondary';
+    }
+
+    public function getStatusBadgeClassAttribute()
+    {
+        $classes = [
+            self::STATUS_ACTIVE => 'badge-primary',
+            self::STATUS_READ => 'badge-secondary',
+            self::STATUS_ARCHIVED => 'badge-dark'
+        ];
+
+        return $classes[$this->status] ?? 'badge-secondary';
+    }
+
+    public function getTimeAgoAttribute()
+    {
+        return $this->created_at->diffForHumans();
+    }
+
+    public function getFormattedCreatedAtAttribute()
+    {
+        return $this->created_at->format('M j, Y g:i A');
+    }
+
+    // Helper methods
+    public function markAsRead()
+    {
+        $this->update([
+            'is_read' => true,
+            'read_at' => now(),
+            'status' => self::STATUS_READ
+        ]);
+    }
+
+    public function archive()
+    {
+        $this->update([
+            'archived_at' => now(),
+            'status' => self::STATUS_ARCHIVED
+        ]);
+    }
+
+    public function isRead()
+    {
+        return $this->is_read;
+    }
+
+    public function isArchived()
+    {
+        return $this->status === self::STATUS_ARCHIVED;
+    }
+
+    public function isHighPriority()
+    {
+        return in_array($this->priority, [self::PRIORITY_HIGH, self::PRIORITY_URGENT]);
+    }
+
+    public function isUrgent()
+    {
+        return $this->priority === self::PRIORITY_URGENT;
+    }
+
+    public function hasLocation()
+    {
+        return !is_null($this->location_latitude) && !is_null($this->location_longitude);
+    }
+
+    public function getLocationString()
+    {
+        if ($this->location_address) {
+            return $this->location_address;
         }
-    }
 
-    public static function createActivity(string $firebaseUid, string $type, array $data): ?self
-    {
-        try {
-            // Initialize FirestoreService
-            $firestoreService = app(FirestoreService::class);
-
-            // Prepare activity data
-            $activityData = [
-                'driver_firebase_uid' => $firebaseUid,
-                'activity_type' => $type,
-                'activity_category' => self::getCategoryForType($type),
-                'title' => $data['title'] ?? self::getDefaultTitle($type),
-                'description' => $data['description'] ?? '',
-                'metadata' => $data['metadata'] ?? [],
-                'priority' => $data['priority'] ?? self::getPriorityForType($type),
-                'status' => self::STATUS_ACTIVE,
-                'created_at' => now()->toISOString(),
-                'updated_at' => now()->toISOString(),
-            ];
-
-            // Optional fields from $data
-            if (isset($data['location_latitude'])) {
-                $activityData['location_latitude'] = (float) $data['location_latitude'];
-            }
-            if (isset($data['location_longitude'])) {
-                $activityData['location_longitude'] = (float) $data['location_longitude'];
-            }
-            if (isset($data['location_address'])) {
-                $activityData['location_address'] = $data['location_address'];
-            }
-            if (isset($data['ip_address'])) {
-                $activityData['ip_address'] = $data['ip_address'];
-            }
-            if (isset($data['user_agent'])) {
-                $activityData['user_agent'] = $data['user_agent'];
-            }
-            if (isset($data['device_type'])) {
-                $activityData['device_type'] = $data['device_type'];
-            }
-            if (isset($data['app_version'])) {
-                $activityData['app_version'] = $data['app_version'];
-            }
-            if (isset($data['related_entity_type'])) {
-                $activityData['related_entity_type'] = $data['related_entity_type'];
-            }
-            if (isset($data['related_entity_id'])) {
-                $activityData['related_entity_id'] = $data['related_entity_id'];
-            }
-
-            // Save to Firestore (assuming a 'driver_activities' collection)
-            $firestoreService->createDocument("driver_activities/{$firebaseUid}/activities", $activityData);
-
-            // Return a new DriverActivity instance
-            return new self($activityData);
-        } catch (\Exception $e) {
-            \Log::error('Failed to create driver activity', [
-                'firebase_uid' => $firebaseUid,
-                'type' => $type,
-                'error' => $e->getMessage(),
-            ]);
-            return null;
+        if ($this->hasLocation()) {
+            return "{$this->location_latitude}, {$this->location_longitude}";
         }
+
+        return null;
     }
-    /**
-     * Get priority badge color
-     */
-    public function getPriorityColorAttribute(): string
+
+    // Firebase sync
+    public function toFirebaseArray()
     {
-        $colors = [
-            self::PRIORITY_LOW => 'secondary',
-            self::PRIORITY_NORMAL => 'primary',
-            self::PRIORITY_HIGH => 'warning',
-            self::PRIORITY_URGENT => 'danger'
+        return [
+            'id' => $this->id,
+            'driver_firebase_uid' => $this->driver_firebase_uid ?? '',
+            'activity_type' => $this->activity_type ?? '',
+            'activity_category' => $this->activity_category ?? '',
+            'title' => $this->title ?? '',
+            'description' => $this->description ?? '',
+            'metadata' => $this->metadata ?? [],
+            'location_latitude' => $this->location_latitude,
+            'location_longitude' => $this->location_longitude,
+            'location_address' => $this->location_address ?? '',
+            'ip_address' => $this->ip_address ?? '',
+            'user_agent' => $this->user_agent ?? '',
+            'device_type' => $this->device_type ?? '',
+            'app_version' => $this->app_version ?? '',
+            'status' => $this->status ?? 'active',
+            'priority' => $this->priority ?? 'normal',
+            'is_read' => $this->is_read ?? false,
+            'read_at' => $this->read_at ? $this->read_at->toISOString() : null,
+            'archived_at' => $this->archived_at ? $this->archived_at->toISOString() : null,
+            'related_entity_type' => $this->related_entity_type ?? '',
+            'related_entity_id' => $this->related_entity_id ?? '',
+            'vehicle_id' => $this->vehicle_id,
+            'ride_id' => $this->ride_id,
+            'document_id' => $this->document_id,
+            'created_by' => $this->created_by ?? 'system',
+            'created_at' => $this->created_at ? $this->created_at->toISOString() : '',
+            'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : '',
+            'sync_updated_at' => now()->toISOString(),
         ];
-
-        return $colors[$this->priority ?? self::PRIORITY_NORMAL] ?? 'secondary';
     }
 
-    /**
-     * Get category badge color
-     */
-    public function getCategoryColorAttribute(): string
+    // Static methods
+    public static function createActivity($firebaseUid, $type, array $data = [])
     {
-        $colors = [
-            self::CATEGORY_AUTH => 'info',
-            self::CATEGORY_RIDE => 'success',
-            self::CATEGORY_PROFILE => 'primary',
-            self::CATEGORY_VEHICLE => 'warning',
-            self::CATEGORY_PAYMENT => 'success',
-            self::CATEGORY_LOCATION => 'info',
-            self::CATEGORY_SYSTEM => 'secondary',
-            self::CATEGORY_SECURITY => 'danger'
-        ];
-
-        return $colors[$this->activity_category ?? self::CATEGORY_SYSTEM] ?? 'secondary';
+        return self::create(array_merge([
+            'driver_firebase_uid' => $firebaseUid,
+            'activity_type' => $type,
+            'activity_category' => self::getCategoryForType($type),
+            'title' => $data['title'] ?? self::getDefaultTitle($type),
+            'description' => $data['description'] ?? '',
+            'priority' => $data['priority'] ?? self::getPriorityForType($type),
+            'status' => self::STATUS_ACTIVE,
+            'is_read' => false,
+            'metadata' => $data['metadata'] ?? [],
+            'created_by' => $data['created_by'] ?? 'system'
+        ], $data));
     }
 
-    /**
-     * Get activity icon based on type
-     */
-    public function getIconAttribute(): string
-    {
-        $icons = [
-            self::TYPE_LOGIN => 'fas fa-sign-in-alt',
-            self::TYPE_LOGOUT => 'fas fa-sign-out-alt',
-            self::TYPE_STATUS_CHANGE => 'fas fa-toggle-on',
-            self::TYPE_LOCATION_UPDATE => 'fas fa-map-marker-alt',
-            self::TYPE_RIDE_REQUEST => 'fas fa-bell',
-            self::TYPE_RIDE_ACCEPT => 'fas fa-check',
-            self::TYPE_RIDE_DECLINE => 'fas fa-times',
-            self::TYPE_RIDE_START => 'fas fa-play',
-            self::TYPE_RIDE_COMPLETE => 'fas fa-flag-checkered',
-            self::TYPE_RIDE_CANCEL => 'fas fa-ban',
-            self::TYPE_PROFILE_UPDATE => 'fas fa-user-edit',
-            self::TYPE_DOCUMENT_UPLOAD => 'fas fa-file-upload',
-            self::TYPE_VEHICLE_UPDATE => 'fas fa-car',
-            self::TYPE_PAYMENT_UPDATE => 'fas fa-credit-card',
-            self::TYPE_RATING_RECEIVED => 'fas fa-star',
-            self::TYPE_EARNINGS_UPDATE => 'fas fa-dollar-sign',
-            self::TYPE_VIOLATION => 'fas fa-exclamation-triangle',
-            self::TYPE_SYSTEM_NOTIFICATION => 'fas fa-info-circle'
-        ];
-
-        return $icons[$this->activity_type ?? ''] ?? 'fas fa-circle';
-    }
-
-    /**
-     * Get category based on activity type
-     */
-    public static function getCategoryForType(string $type): string
+    public static function getCategoryForType($type)
     {
         $categoryMap = [
             self::TYPE_LOGIN => self::CATEGORY_AUTH,
@@ -313,22 +381,27 @@ class DriverActivity
             self::TYPE_RIDE_COMPLETE => self::CATEGORY_RIDE,
             self::TYPE_RIDE_CANCEL => self::CATEGORY_RIDE,
             self::TYPE_PROFILE_UPDATE => self::CATEGORY_PROFILE,
-            self::TYPE_DOCUMENT_UPLOAD => self::CATEGORY_PROFILE,
+            self::TYPE_DOCUMENT_UPLOAD => self::CATEGORY_DOCUMENT,
+            self::TYPE_DOCUMENT_UPDATE => self::CATEGORY_DOCUMENT,
             self::TYPE_VEHICLE_UPDATE => self::CATEGORY_VEHICLE,
+            self::TYPE_VEHICLE_ADD => self::CATEGORY_VEHICLE,
+            self::TYPE_VEHICLE_REMOVE => self::CATEGORY_VEHICLE,
             self::TYPE_PAYMENT_UPDATE => self::CATEGORY_PAYMENT,
             self::TYPE_RATING_RECEIVED => self::CATEGORY_RIDE,
             self::TYPE_EARNINGS_UPDATE => self::CATEGORY_PAYMENT,
+            self::TYPE_VERIFICATION_UPDATE => self::CATEGORY_VERIFICATION,
             self::TYPE_VIOLATION => self::CATEGORY_SECURITY,
-            self::TYPE_SYSTEM_NOTIFICATION => self::CATEGORY_SYSTEM
+            self::TYPE_SYSTEM_NOTIFICATION => self::CATEGORY_SYSTEM,
+            self::TYPE_MAINTENANCE_REMINDER => self::CATEGORY_MAINTENANCE,
+            self::TYPE_INSURANCE_EXPIRY => self::CATEGORY_EXPIRY,
+            self::TYPE_REGISTRATION_EXPIRY => self::CATEGORY_EXPIRY,
+            self::TYPE_LICENSE_EXPIRY => self::CATEGORY_EXPIRY
         ];
 
         return $categoryMap[$type] ?? self::CATEGORY_SYSTEM;
     }
 
-    /**
-     * Get default title for activity type
-     */
-    public static function getDefaultTitle(string $type): string
+    public static function getDefaultTitle($type)
     {
         $titles = [
             self::TYPE_LOGIN => 'Driver Logged In',
@@ -343,21 +416,26 @@ class DriverActivity
             self::TYPE_RIDE_CANCEL => 'Ride Cancelled',
             self::TYPE_PROFILE_UPDATE => 'Profile Updated',
             self::TYPE_DOCUMENT_UPLOAD => 'Document Uploaded',
+            self::TYPE_DOCUMENT_UPDATE => 'Document Updated',
             self::TYPE_VEHICLE_UPDATE => 'Vehicle Information Updated',
+            self::TYPE_VEHICLE_ADD => 'Vehicle Added',
+            self::TYPE_VEHICLE_REMOVE => 'Vehicle Removed',
             self::TYPE_PAYMENT_UPDATE => 'Payment Information Updated',
             self::TYPE_RATING_RECEIVED => 'Rating Received',
             self::TYPE_EARNINGS_UPDATE => 'Earnings Updated',
+            self::TYPE_VERIFICATION_UPDATE => 'Verification Status Updated',
             self::TYPE_VIOLATION => 'Policy Violation',
-            self::TYPE_SYSTEM_NOTIFICATION => 'System Notification'
+            self::TYPE_SYSTEM_NOTIFICATION => 'System Notification',
+            self::TYPE_MAINTENANCE_REMINDER => 'Maintenance Reminder',
+            self::TYPE_INSURANCE_EXPIRY => 'Insurance Expiry Warning',
+            self::TYPE_REGISTRATION_EXPIRY => 'Registration Expiry Warning',
+            self::TYPE_LICENSE_EXPIRY => 'License Expiry Warning'
         ];
 
         return $titles[$type] ?? 'Activity';
     }
 
-    /**
-     * Get priority for activity type
-     */
-    public static function getPriorityForType(string $type): string
+    public static function getPriorityForType($type)
     {
         $priorities = [
             self::TYPE_LOGIN => self::PRIORITY_LOW,
@@ -372,21 +450,26 @@ class DriverActivity
             self::TYPE_RIDE_CANCEL => self::PRIORITY_HIGH,
             self::TYPE_PROFILE_UPDATE => self::PRIORITY_NORMAL,
             self::TYPE_DOCUMENT_UPLOAD => self::PRIORITY_NORMAL,
+            self::TYPE_DOCUMENT_UPDATE => self::PRIORITY_NORMAL,
             self::TYPE_VEHICLE_UPDATE => self::PRIORITY_NORMAL,
+            self::TYPE_VEHICLE_ADD => self::PRIORITY_NORMAL,
+            self::TYPE_VEHICLE_REMOVE => self::PRIORITY_NORMAL,
             self::TYPE_PAYMENT_UPDATE => self::PRIORITY_NORMAL,
             self::TYPE_RATING_RECEIVED => self::PRIORITY_NORMAL,
             self::TYPE_EARNINGS_UPDATE => self::PRIORITY_NORMAL,
+            self::TYPE_VERIFICATION_UPDATE => self::PRIORITY_HIGH,
             self::TYPE_VIOLATION => self::PRIORITY_URGENT,
-            self::TYPE_SYSTEM_NOTIFICATION => self::PRIORITY_NORMAL
+            self::TYPE_SYSTEM_NOTIFICATION => self::PRIORITY_NORMAL,
+            self::TYPE_MAINTENANCE_REMINDER => self::PRIORITY_HIGH,
+            self::TYPE_INSURANCE_EXPIRY => self::PRIORITY_URGENT,
+            self::TYPE_REGISTRATION_EXPIRY => self::PRIORITY_URGENT,
+            self::TYPE_LICENSE_EXPIRY => self::PRIORITY_URGENT
         ];
 
         return $priorities[$type] ?? self::PRIORITY_NORMAL;
     }
 
-    /**
-     * Get available activity types
-     */
-    public static function getActivityTypes(): array
+    public static function getActivityTypes()
     {
         return [
             self::TYPE_LOGIN => 'Login',
@@ -401,19 +484,24 @@ class DriverActivity
             self::TYPE_RIDE_CANCEL => 'Ride Cancel',
             self::TYPE_PROFILE_UPDATE => 'Profile Update',
             self::TYPE_DOCUMENT_UPLOAD => 'Document Upload',
+            self::TYPE_DOCUMENT_UPDATE => 'Document Update',
             self::TYPE_VEHICLE_UPDATE => 'Vehicle Update',
+            self::TYPE_VEHICLE_ADD => 'Vehicle Added',
+            self::TYPE_VEHICLE_REMOVE => 'Vehicle Removed',
             self::TYPE_PAYMENT_UPDATE => 'Payment Update',
             self::TYPE_RATING_RECEIVED => 'Rating Received',
             self::TYPE_EARNINGS_UPDATE => 'Earnings Update',
+            self::TYPE_VERIFICATION_UPDATE => 'Verification Update',
             self::TYPE_VIOLATION => 'Violation',
-            self::TYPE_SYSTEM_NOTIFICATION => 'System Notification'
+            self::TYPE_SYSTEM_NOTIFICATION => 'System Notification',
+            self::TYPE_MAINTENANCE_REMINDER => 'Maintenance Reminder',
+            self::TYPE_INSURANCE_EXPIRY => 'Insurance Expiry',
+            self::TYPE_REGISTRATION_EXPIRY => 'Registration Expiry',
+            self::TYPE_LICENSE_EXPIRY => 'License Expiry'
         ];
     }
 
-    /**
-     * Get available categories
-     */
-    public static function getCategories(): array
+    public static function getCategories()
     {
         return [
             self::CATEGORY_AUTH => 'Authentication',
@@ -423,14 +511,15 @@ class DriverActivity
             self::CATEGORY_PAYMENT => 'Payment',
             self::CATEGORY_LOCATION => 'Location',
             self::CATEGORY_SYSTEM => 'System',
-            self::CATEGORY_SECURITY => 'Security'
+            self::CATEGORY_SECURITY => 'Security',
+            self::CATEGORY_DOCUMENT => 'Documents',
+            self::CATEGORY_VERIFICATION => 'Verification',
+            self::CATEGORY_MAINTENANCE => 'Maintenance',
+            self::CATEGORY_EXPIRY => 'Expiry Alerts'
         ];
     }
 
-    /**
-     * Get available priorities
-     */
-    public static function getPriorities(): array
+    public static function getPriorities()
     {
         return [
             self::PRIORITY_LOW => 'Low',
@@ -440,69 +529,40 @@ class DriverActivity
         ];
     }
 
-    /**
-     * Format date attributes
-     */
-    public function getFormattedDate(string $attribute): ?string
+    public static function getStatuses()
     {
-        $value = $this->attributes[$attribute] ?? null;
-        if (!$value) return null;
-
-        try {
-            return Carbon::parse($value)->format('M d, Y');
-        } catch (\Exception $e) {
-            return null;
-        }
+        return [
+            self::STATUS_ACTIVE => 'Active',
+            self::STATUS_READ => 'Read',
+            self::STATUS_ARCHIVED => 'Archived'
+        ];
     }
 
-    /**
-     * Format datetime attributes
-     */
-    public function getFormattedDateTime(string $attribute): ?string
+    // Bulk operations
+    public static function markMultipleAsRead(array $activityIds)
     {
-        $value = $this->attributes[$attribute] ?? null;
-        if (!$value) return null;
-
-        try {
-            return Carbon::parse($value)->format('M d, Y H:i');
-        } catch (\Exception $e) {
-            return null;
-        }
+        return self::whereIn('id', $activityIds)->update([
+            'is_read' => true,
+            'read_at' => now(),
+            'status' => self::STATUS_READ
+        ]);
     }
 
-    /**
-     * Prepare data for Firestore storage
-     */
-    public function prepareForFirestore(): array
+    public static function archiveMultiple(array $activityIds)
     {
-        $data = $this->attributes;
+        return self::whereIn('id', $activityIds)->update([
+            'archived_at' => now(),
+            'status' => self::STATUS_ARCHIVED
+        ]);
+    }
+
+    // Cleanup old activities
+    public static function cleanupOldActivities($daysToKeep = 90)
+    {
+        $cutoffDate = now()->subDays($daysToKeep);
         
-        // Ensure metadata is an object/array
-        if (isset($data['metadata']) && !is_array($data['metadata'])) {
-            $data['metadata'] = [];
-        }
-        
-        // Convert numeric values
-        if (isset($data['location_latitude'])) {
-            $data['location_latitude'] = (float) $data['location_latitude'];
-        }
-        
-        if (isset($data['location_longitude'])) {
-            $data['location_longitude'] = (float) $data['location_longitude'];
-        }
-        
-        // Ensure required fields have defaults
-        $data['status'] = $data['status'] ?? self::STATUS_ACTIVE;
-        $data['priority'] = $data['priority'] ?? self::PRIORITY_NORMAL;
-        $data['activity_category'] = $data['activity_category'] ?? self::getCategoryForType($data['activity_type'] ?? '');
-        $data['metadata'] = $data['metadata'] ?? [];
-        
-        // Set timestamps
-        if (!isset($data['created_at'])) {
-            $data['created_at'] = now()->toISOString();
-        }
-        $data['updated_at'] = now()->toISOString();
-        
-        return $data;
+        return self::where('created_at', '<', $cutoffDate)
+                   ->where('priority', '!=', self::PRIORITY_URGENT)
+                   ->delete();
     }
 }
