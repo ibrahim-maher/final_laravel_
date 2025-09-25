@@ -3,119 +3,30 @@
 namespace App\Modules\Driver\Services;
 
 use App\Modules\Driver\Models\Ride;
-use App\Services\FirestoreService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Carbon\Carbon;
 
 class DriverRideService
 {
-    protected $firestoreService;
     protected $rideModel;
 
     public function __construct()
     {
-        $this->firestoreService = new FirestoreService();
         $this->rideModel = new Ride();
     }
 
     /**
-     * Get all rides with optional filters
+     * Get all rides with comprehensive filtering
      */
     public function getAllRides(array $filters = []): array
     {
         try {
             Log::info('DriverRideService: Getting all rides', ['filters' => $filters]);
 
-            $limit = $filters['limit'] ?? 100;
-            $useCache = !isset($filters['no_cache']) || !$filters['no_cache'];
-
-            $rides = $this->firestoreService
-                ->collection('rides')
-                ->getAll($limit, $useCache);
-
-            // Apply client-side filters
-            if (!empty($filters['search'])) {
-                $search = strtolower($filters['search']);
-                $rides = array_filter($rides, function ($ride) use ($search) {
-                    return stripos($ride['ride_id'] ?? '', $search) !== false ||
-                        stripos($ride['passenger_name'] ?? '', $search) !== false ||
-                        stripos($ride['driver_name'] ?? '', $search) !== false ||
-                        stripos($ride['pickup_address'] ?? '', $search) !== false ||
-                        stripos($ride['dropoff_address'] ?? '', $search) !== false;
-                });
-            }
-
-            if (!empty($filters['status'])) {
-                $rides = array_filter($rides, function ($ride) use ($filters) {
-                    return ($ride['status'] ?? '') === $filters['status'];
-                });
-            }
-
-            if (!empty($filters['ride_type'])) {
-                $rides = array_filter($rides, function ($ride) use ($filters) {
-                    return ($ride['ride_type'] ?? '') === $filters['ride_type'];
-                });
-            }
-
-            if (!empty($filters['payment_status'])) {
-                $rides = array_filter($rides, function ($ride) use ($filters) {
-                    return ($ride['payment_status'] ?? '') === $filters['payment_status'];
-                });
-            }
-
-            if (!empty($filters['driver_firebase_uid'])) {
-                $rides = array_filter($rides, function ($ride) use ($filters) {
-                    return ($ride['driver_firebase_uid'] ?? '') === $filters['driver_firebase_uid'];
-                });
-            }
-
-            // Apply date filters
-            if (!empty($filters['date_from']) || !empty($filters['date_to'])) {
-                $rides = array_filter($rides, function ($ride) use ($filters) {
-                    $rideDate = Carbon::parse($ride['created_at'] ?? now());
-
-                    if (!empty($filters['date_from'])) {
-                        $dateFrom = Carbon::parse($filters['date_from'])->startOfDay();
-                        if ($rideDate->lt($dateFrom)) {
-                            return false;
-                        }
-                    }
-
-                    if (!empty($filters['date_to'])) {
-                        $dateTo = Carbon::parse($filters['date_to'])->endOfDay();
-                        if ($rideDate->gt($dateTo)) {
-                            return false;
-                        }
-                    }
-
-                    return true;
-                });
-            }
-
-            // Sort by created_at descending
-            usort($rides, function ($a, $b) {
-                $dateA = Carbon::parse($a['created_at'] ?? now());
-                $dateB = Carbon::parse($b['created_at'] ?? now());
-                return $dateB->timestamp - $dateA->timestamp;
-            });
-
-            // Apply limit after filtering
-            if (isset($filters['limit']) && $filters['limit'] > 0) {
-                $rides = array_slice($rides, 0, $filters['limit']);
-            }
-
-            // Format all rides
-            $rides = array_map([$this, 'formatRideData'], $rides);
-
-            Log::info('Retrieved rides successfully', [
-                'count' => count($rides),
-                'filters' => $filters
-            ]);
-
-            return array_values($rides);
+            return $this->rideModel->getAllRides($filters);
         } catch (\Exception $e) {
-            Log::error('Error retrieving rides: ' . $e->getMessage(), [
+            Log::error('DriverRideService: Error getting all rides: ' . $e->getMessage(), [
                 'filters' => $filters,
                 'trace' => $e->getTraceAsString()
             ]);
@@ -129,58 +40,122 @@ class DriverRideService
     public function getRideById(string $rideId): ?array
     {
         try {
-            Log::info('Getting ride by ID', ['ride_id' => $rideId]);
+            Log::info('DriverRideService: Getting ride by ID', ['ride_id' => $rideId]);
 
-            $ride = $this->firestoreService
-                ->collection('rides')
-                ->find($rideId);
+            $cacheKey = "ride_{$rideId}";
 
-            if ($ride) {
-                $ride = $this->formatRideData($ride);
-                Log::info('Ride found', ['ride_id' => $rideId]);
-                return $ride;
-            }
-
-            Log::warning('Ride not found', ['ride_id' => $rideId]);
-            return null;
+            return Cache::remember($cacheKey, 300, function () use ($rideId) {
+                return $this->rideModel->getRideById($rideId);
+            });
         } catch (\Exception $e) {
-            Log::error('Error getting ride by ID: ' . $e->getMessage(), [
-                'ride_id' => $rideId,
-                'trace' => $e->getTraceAsString()
+            Log::error('DriverRideService: Error getting ride by ID: ' . $e->getMessage(), [
+                'ride_id' => $rideId
             ]);
             return null;
         }
     }
 
     /**
-     * Create new ride
+     * Get rides for a specific driver
+     */
+    public function getDriverRides(string $driverFirebaseUid, array $filters = []): array
+    {
+        try {
+            Log::info('DriverRideService: Getting driver rides', [
+                'driver_uid' => $driverFirebaseUid,
+                'filters' => $filters
+            ]);
+
+            return $this->rideModel->getRidesByDriver($driverFirebaseUid, $filters);
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error getting driver rides: ' . $e->getMessage(), [
+                'driver_uid' => $driverFirebaseUid,
+                'filters' => $filters
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Get rides for a specific passenger
+     */
+    public function getPassengerRides(string $passengerFirebaseUid, array $filters = []): array
+    {
+        try {
+            Log::info('DriverRideService: Getting passenger rides', [
+                'passenger_uid' => $passengerFirebaseUid,
+                'filters' => $filters
+            ]);
+
+            $filters['passenger_firebase_uid'] = $passengerFirebaseUid;
+            return $this->rideModel->getAllRides($filters);
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error getting passenger rides: ' . $e->getMessage(), [
+                'passenger_uid' => $passengerFirebaseUid,
+                'filters' => $filters
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Search rides with advanced filtering
+     */
+    public function searchRides(string $searchTerm, array $filters = []): array
+    {
+        try {
+            Log::info('DriverRideService: Searching rides', [
+                'search_term' => $searchTerm,
+                'filters' => $filters
+            ]);
+
+            return $this->rideModel->searchRides($searchTerm, $filters);
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error searching rides: ' . $e->getMessage(), [
+                'search_term' => $searchTerm,
+                'filters' => $filters
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Create new ride with validation
      */
     public function createRide(array $rideData): ?array
     {
         try {
-            Log::info('Creating new ride', [
-                'driver_uid' => $rideData['driver_firebase_uid'] ?? 'unknown'
+            Log::info('DriverRideService: Creating new ride', [
+                'driver_uid' => $rideData['driver_firebase_uid'] ?? 'unknown',
+                'passenger_name' => $rideData['passenger_name'] ?? 'unknown'
             ]);
 
-            $rideData = $this->prepareRideData($rideData);
-
-            $result = $this->firestoreService
-                ->collection('rides')
-                ->create($rideData);
-
-            if ($result) {
-                $result = $this->formatRideData($result);
-                Log::info('Ride created successfully', [
-                    'ride_id' => $result['id'],
-                    'driver_uid' => $rideData['driver_firebase_uid'] ?? 'unknown'
+            // Validate required fields
+            $validation = $this->validateRideData($rideData);
+            if (!$validation['valid']) {
+                Log::error('DriverRideService: Validation failed for ride creation', [
+                    'errors' => $validation['errors']
                 ]);
-                return $result;
+                return null;
             }
 
-            Log::error('Failed to create ride');
-            return null;
+            // Enrich ride data
+            $rideData = $this->enrichRideData($rideData);
+
+            $result = $this->rideModel->createRide($rideData);
+
+            if ($result) {
+                // Clear relevant caches
+                $this->clearRidesCaches();
+
+                Log::info('DriverRideService: Ride created successfully', [
+                    'ride_id' => $result['id']
+                ]);
+            }
+
+            return $result;
         } catch (\Exception $e) {
-            Log::error('Error creating ride: ' . $e->getMessage(), [
+            Log::error('DriverRideService: Error creating ride: ' . $e->getMessage(), [
                 'data' => $rideData,
                 'trace' => $e->getTraceAsString()
             ]);
@@ -189,76 +164,92 @@ class DriverRideService
     }
 
     /**
-     * Update ride
+     * Update ride with validation
      */
-    public function updateRide(string $rideId, array $data): bool
+    public function updateRide(string $rideId, array $rideData): bool
     {
         try {
-            Log::info('Updating ride', [
+            Log::info('DriverRideService: Updating ride', [
                 'ride_id' => $rideId,
-                'fields' => array_keys($data)
+                'fields' => array_keys($rideData)
             ]);
 
-            $data['updated_at'] = now()->format('Y-m-d H:i:s');
-
-            // Remove empty values
-            $data = array_filter($data, function ($value) {
-                return $value !== null && $value !== '';
-            });
-
-            $result = $this->firestoreService
-                ->collection('rides')
-                ->update($rideId, $data);
-
-            if ($result) {
-                Log::info('Ride updated successfully', [
-                    'ride_id' => $rideId,
-                    'updated_fields' => array_keys($data)
-                ]);
-                return true;
+            // Get current ride for validation
+            $currentRide = $this->getRideById($rideId);
+            if (!$currentRide) {
+                Log::error('DriverRideService: Ride not found for update', ['ride_id' => $rideId]);
+                return false;
             }
 
-            Log::error('Failed to update ride', ['ride_id' => $rideId]);
-            return false;
+            // Validate update data
+            $validation = $this->validateRideUpdate($rideData, $currentRide);
+            if (!$validation['valid']) {
+                Log::error('DriverRideService: Validation failed for ride update', [
+                    'ride_id' => $rideId,
+                    'errors' => $validation['errors']
+                ]);
+                return false;
+            }
+
+            $result = $this->rideModel->updateRide($rideId, $rideData);
+
+            if ($result) {
+                // Clear relevant caches
+                $this->clearRideCaches($rideId);
+
+                Log::info('DriverRideService: Ride updated successfully', [
+                    'ride_id' => $rideId
+                ]);
+            }
+
+            return $result;
         } catch (\Exception $e) {
-            Log::error('Error updating ride: ' . $e->getMessage(), [
+            Log::error('DriverRideService: Error updating ride: ' . $e->getMessage(), [
                 'ride_id' => $rideId,
-                'data' => $data
+                'data' => $rideData
             ]);
             return false;
         }
     }
 
     /**
-     * Update ride status
+     * Update ride status with proper state management
      */
     public function updateRideStatus(string $rideId, string $status, array $additionalData = []): bool
     {
         try {
+            Log::info('DriverRideService: Updating ride status', [
+                'ride_id' => $rideId,
+                'status' => $status
+            ]);
+
+            // Validate status transition
+            $currentRide = $this->getRideById($rideId);
+            if (!$currentRide) {
+                Log::error('DriverRideService: Ride not found for status update', ['ride_id' => $rideId]);
+                return false;
+            }
+
+            if (!$this->isValidStatusTransition($currentRide['status'], $status)) {
+                Log::error('DriverRideService: Invalid status transition', [
+                    'ride_id' => $rideId,
+                    'from_status' => $currentRide['status'],
+                    'to_status' => $status
+                ]);
+                return false;
+            }
+
             $updateData = array_merge($additionalData, [
                 'status' => $status,
                 'status_updated_at' => now()->format('Y-m-d H:i:s')
             ]);
 
-            // Set timestamps based on status
-            switch ($status) {
-                case Ride::STATUS_ACCEPTED:
-                    $updateData['accepted_at'] = now()->format('Y-m-d H:i:s');
-                    break;
-                case Ride::STATUS_IN_PROGRESS:
-                    $updateData['started_at'] = now()->format('Y-m-d H:i:s');
-                    break;
-                case Ride::STATUS_COMPLETED:
-                    $updateData['completed_at'] = now()->format('Y-m-d H:i:s');
-                    break;
-                case Ride::STATUS_CANCELLED:
-                    $updateData['cancelled_at'] = now()->format('Y-m-d H:i:s');
-                    break;
-            }
+            // Set appropriate timestamps based on status
+            $updateData = $this->addStatusTimestamps($updateData, $status);
 
             return $this->updateRide($rideId, $updateData);
         } catch (\Exception $e) {
-            Log::error('Error updating ride status: ' . $e->getMessage(), [
+            Log::error('DriverRideService: Error updating ride status: ' . $e->getMessage(), [
                 'ride_id' => $rideId,
                 'status' => $status
             ]);
@@ -267,26 +258,50 @@ class DriverRideService
     }
 
     /**
-     * Complete ride
+     * Complete ride with comprehensive data
      */
     public function completeRide(string $rideId, array $completionData = []): bool
     {
         try {
+            Log::info('DriverRideService: Completing ride', [
+                'ride_id' => $rideId,
+                'completion_data_keys' => array_keys($completionData)
+            ]);
+
+            $currentRide = $this->getRideById($rideId);
+            if (!$currentRide) {
+                Log::error('DriverRideService: Ride not found for completion', ['ride_id' => $rideId]);
+                return false;
+            }
+
+            // Validate that ride can be completed
+            if (!$this->canCompleteRide($currentRide)) {
+                Log::error('DriverRideService: Ride cannot be completed', [
+                    'ride_id' => $rideId,
+                    'current_status' => $currentRide['status']
+                ]);
+                return false;
+            }
+
             $updateData = array_merge($completionData, [
                 'status' => Ride::STATUS_COMPLETED,
                 'completed_at' => now()->format('Y-m-d H:i:s'),
                 'status_updated_at' => now()->format('Y-m-d H:i:s')
             ]);
 
-            // If actual fare is not provided but we have estimated fare, use it
-            $ride = $this->getRideById($rideId);
-            if (!isset($updateData['actual_fare']) && isset($ride['estimated_fare'])) {
-                $updateData['actual_fare'] = $ride['estimated_fare'];
+            // Auto-calculate fields if not provided
+            $updateData = $this->calculateCompletionData($currentRide, $updateData);
+
+            $result = $this->updateRide($rideId, $updateData);
+
+            if ($result) {
+                // Trigger completion events
+                $this->handleRideCompletion($rideId, $currentRide, $updateData);
             }
 
-            return $this->updateRide($rideId, $updateData);
+            return $result;
         } catch (\Exception $e) {
-            Log::error('Error completing ride: ' . $e->getMessage(), [
+            Log::error('DriverRideService: Error completing ride: ' . $e->getMessage(), [
                 'ride_id' => $rideId,
                 'completion_data' => $completionData
             ]);
@@ -295,11 +310,32 @@ class DriverRideService
     }
 
     /**
-     * Cancel ride
+     * Cancel ride with reason tracking
      */
     public function cancelRide(string $rideId, string $reason = null, string $cancelledBy = 'system', array $additionalData = []): bool
     {
         try {
+            Log::info('DriverRideService: Cancelling ride', [
+                'ride_id' => $rideId,
+                'reason' => $reason,
+                'cancelled_by' => $cancelledBy
+            ]);
+
+            $currentRide = $this->getRideById($rideId);
+            if (!$currentRide) {
+                Log::error('DriverRideService: Ride not found for cancellation', ['ride_id' => $rideId]);
+                return false;
+            }
+
+            // Validate that ride can be cancelled
+            if (!$this->canCancelRide($currentRide)) {
+                Log::error('DriverRideService: Ride cannot be cancelled', [
+                    'ride_id' => $rideId,
+                    'current_status' => $currentRide['status']
+                ]);
+                return false;
+            }
+
             $updateData = array_merge($additionalData, [
                 'status' => Ride::STATUS_CANCELLED,
                 'cancelled_at' => now()->format('Y-m-d H:i:s'),
@@ -311,9 +347,16 @@ class DriverRideService
                 $updateData['cancellation_reason'] = $reason;
             }
 
-            return $this->updateRide($rideId, $updateData);
+            $result = $this->updateRide($rideId, $updateData);
+
+            if ($result) {
+                // Handle cancellation-specific logic
+                $this->handleRideCancellation($rideId, $currentRide, $updateData);
+            }
+
+            return $result;
         } catch (\Exception $e) {
-            Log::error('Error cancelling ride: ' . $e->getMessage(), [
+            Log::error('DriverRideService: Error cancelling ride: ' . $e->getMessage(), [
                 'ride_id' => $rideId,
                 'reason' => $reason
             ]);
@@ -322,54 +365,20 @@ class DriverRideService
     }
 
     /**
-     * Get rides by driver
-     */
-    public function getRidesByDriver(string $driverFirebaseUid, array $filters = []): array
-    {
-        try {
-            Log::info('Getting rides by driver', [
-                'driver_uid' => $driverFirebaseUid,
-                'filters' => $filters
-            ]);
-
-            // Add driver filter
-            $filters['driver_firebase_uid'] = $driverFirebaseUid;
-
-            return $this->getAllRides($filters);
-        } catch (\Exception $e) {
-            Log::error('Error getting rides by driver: ' . $e->getMessage(), [
-                'driver_uid' => $driverFirebaseUid,
-                'filters' => $filters
-            ]);
-            return [];
-        }
-    }
-
-    /**
-     * Get rides by status
+     * Get rides by status with caching
      */
     public function getRidesByStatus(string $status, array $filters = []): array
     {
-        $filters['status'] = $status;
-        return $this->getAllRides($filters);
-    }
-
-    /**
-     * Search rides
-     */
-    public function searchRides(string $searchTerm, array $filters = []): array
-    {
         try {
-            Log::info('Searching rides', [
-                'search_term' => $searchTerm,
+            Log::info('DriverRideService: Getting rides by status', [
+                'status' => $status,
                 'filters' => $filters
             ]);
 
-            $filters['search'] = $searchTerm;
-            return $this->getAllRides($filters);
+            return $this->rideModel->getRidesByStatus($status, $filters);
         } catch (\Exception $e) {
-            Log::error('Error searching rides: ' . $e->getMessage(), [
-                'search_term' => $searchTerm,
+            Log::error('DriverRideService: Error getting rides by status: ' . $e->getMessage(), [
+                'status' => $status,
                 'filters' => $filters
             ]);
             return [];
@@ -382,23 +391,13 @@ class DriverRideService
     public function getActiveRidesForDriver(string $driverFirebaseUid): array
     {
         try {
-            $allRides = $this->getRidesByDriver($driverFirebaseUid, ['limit' => 1000]);
+            Log::info('DriverRideService: Getting active rides for driver', [
+                'driver_uid' => $driverFirebaseUid
+            ]);
 
-            $activeStatuses = [
-                Ride::STATUS_PENDING,
-                Ride::STATUS_REQUESTED,
-                Ride::STATUS_ACCEPTED,
-                Ride::STATUS_DRIVER_ARRIVED,
-                Ride::STATUS_IN_PROGRESS
-            ];
-
-            $activeRides = array_filter($allRides, function ($ride) use ($activeStatuses) {
-                return in_array($ride['status'] ?? '', $activeStatuses);
-            });
-
-            return array_values($activeRides);
+            return $this->rideModel->getActiveRidesForDriver($driverFirebaseUid);
         } catch (\Exception $e) {
-            Log::error('Error getting active rides for driver: ' . $e->getMessage(), [
+            Log::error('DriverRideService: Error getting active rides for driver: ' . $e->getMessage(), [
                 'driver_uid' => $driverFirebaseUid
             ]);
             return [];
@@ -406,348 +405,174 @@ class DriverRideService
     }
 
     /**
-     * Get ride statistics
+     * Get completed rides for driver with pagination
      */
-    public function getRideStatistics(array $filters = []): array
-    {
-        try {
-            $rides = $this->getAllRides(array_merge($filters, ['limit' => 10000, 'no_cache' => true]));
-
-            $stats = [
-                'total_rides' => count($rides),
-                'completed_rides' => 0,
-                'cancelled_rides' => 0,
-                'in_progress_rides' => 0,
-                'pending_rides' => 0,
-                'total_earnings' => 0,
-                'average_rating' => 0,
-                'total_distance' => 0,
-                'total_duration' => 0,
-                'completion_rate' => 0,
-                'cancellation_rate' => 0
-            ];
-
-            if (empty($rides)) {
-                return $stats;
-            }
-
-            $totalRating = 0;
-            $ratedRides = 0;
-
-            foreach ($rides as $ride) {
-                // Count by status
-                switch ($ride['status']) {
-                    case Ride::STATUS_COMPLETED:
-                        $stats['completed_rides']++;
-                        break;
-                    case Ride::STATUS_CANCELLED:
-                        $stats['cancelled_rides']++;
-                        break;
-                    case Ride::STATUS_IN_PROGRESS:
-                    case Ride::STATUS_ACCEPTED:
-                    case Ride::STATUS_DRIVER_ARRIVED:
-                        $stats['in_progress_rides']++;
-                        break;
-                    default:
-                        $stats['pending_rides']++;
-                        break;
-                }
-
-                // Sum earnings
-                if (isset($ride['actual_fare'])) {
-                    $stats['total_earnings'] += (float) $ride['actual_fare'];
-                } elseif (isset($ride['estimated_fare'])) {
-                    $stats['total_earnings'] += (float) $ride['estimated_fare'];
-                }
-
-                // Sum distance
-                if (isset($ride['distance_km'])) {
-                    $stats['total_distance'] += (float) $ride['distance_km'];
-                }
-
-                // Sum duration
-                if (isset($ride['duration_minutes'])) {
-                    $stats['total_duration'] += (int) $ride['duration_minutes'];
-                }
-
-                // Calculate average rating
-                if (isset($ride['driver_rating']) && $ride['driver_rating'] > 0) {
-                    $totalRating += (float) $ride['driver_rating'];
-                    $ratedRides++;
-                }
-            }
-
-            // Calculate averages
-            if ($ratedRides > 0) {
-                $stats['average_rating'] = round($totalRating / $ratedRides, 2);
-            }
-
-            $stats['completion_rate'] = $stats['total_rides'] > 0
-                ? round(($stats['completed_rides'] / $stats['total_rides']) * 100, 2)
-                : 0;
-
-            $stats['cancellation_rate'] = $stats['total_rides'] > 0
-                ? round(($stats['cancelled_rides'] / $stats['total_rides']) * 100, 2)
-                : 0;
-
-            return $stats;
-        } catch (\Exception $e) {
-            Log::error('Error calculating ride statistics: ' . $e->getMessage());
-            return $this->getDefaultStatistics();
-        }
-    }
-
-    /**
-     * Get ride summary data
-     */
-    public function getRideSummaryData(): array
-    {
-        try {
-            $today = now()->startOfDay()->format('Y-m-d H:i:s');
-            $weekStart = now()->startOfWeek()->format('Y-m-d H:i:s');
-            $monthStart = now()->startOfMonth()->format('Y-m-d H:i:s');
-
-            return [
-                'today' => $this->getRideStatistics(['date_from' => $today]),
-                'this_week' => $this->getRideStatistics(['date_from' => $weekStart]),
-                'this_month' => $this->getRideStatistics(['date_from' => $monthStart])
-            ];
-        } catch (\Exception $e) {
-            Log::error('Error getting ride summary data: ' . $e->getMessage());
-            return [
-                'today' => $this->getDefaultStatistics(),
-                'this_week' => $this->getDefaultStatistics(),
-                'this_month' => $this->getDefaultStatistics()
-            ];
-        }
-    }
-
-    /**
-     * Delete ride
-     */
-    public function deleteRide(string $rideId): bool
-    {
-        try {
-            Log::info('Deleting ride', ['ride_id' => $rideId]);
-
-            $result = $this->firestoreService
-                ->collection('rides')
-                ->delete($rideId);
-
-            if ($result) {
-                Log::info('Ride deleted successfully', ['ride_id' => $rideId]);
-                return true;
-            }
-
-            return false;
-        } catch (\Exception $e) {
-            Log::error('Error deleting ride: ' . $e->getMessage(), [
-                'ride_id' => $rideId
-            ]);
-            return false;
-        }
-    }
-
-    /**
-     * Get driver rides count
-     */
-    public function getDriverRidesCount(string $driverFirebaseUid): int
-    {
-        try {
-            $rides = $this->getRidesByDriver($driverFirebaseUid, ['limit' => 10000]);
-            return count($rides);
-        } catch (\Exception $e) {
-            Log::error('Error getting driver rides count: ' . $e->getMessage());
-            return 0;
-        }
-    }
-
-    /**
-     * Get driver earnings
-     */
-    public function getDriverEarnings(string $driverFirebaseUid, array $filters = []): float
+    public function getCompletedRidesForDriver(string $driverFirebaseUid, array $filters = []): array
     {
         try {
             $filters['status'] = Ride::STATUS_COMPLETED;
-            $rides = $this->getRidesByDriver($driverFirebaseUid, $filters);
-
-            $totalEarnings = 0;
-            foreach ($rides as $ride) {
-                if (isset($ride['actual_fare'])) {
-                    $totalEarnings += (float) $ride['actual_fare'];
-                } elseif (isset($ride['estimated_fare'])) {
-                    $totalEarnings += (float) $ride['estimated_fare'];
-                }
-            }
-
-            return $totalEarnings;
+            return $this->getDriverRides($driverFirebaseUid, $filters);
         } catch (\Exception $e) {
-            Log::error('Error getting driver earnings: ' . $e->getMessage());
-            return 0.0;
-        }
-    }
-
-    /**
-     * Get driver average rating
-     */
-    public function getDriverAverageRating(string $driverFirebaseUid): float
-    {
-        try {
-            $rides = $this->getRidesByDriver($driverFirebaseUid, ['limit' => 1000]);
-
-            $totalRating = 0;
-            $ratedRides = 0;
-
-            foreach ($rides as $ride) {
-                if (isset($ride['driver_rating']) && $ride['driver_rating'] > 0) {
-                    $totalRating += (float) $ride['driver_rating'];
-                    $ratedRides++;
-                }
-            }
-
-            return $ratedRides > 0 ? round($totalRating / $ratedRides, 2) : 0;
-        } catch (\Exception $e) {
-            Log::error('Error getting driver average rating: ' . $e->getMessage());
-            return 0.0;
-        }
-    }
-
-    /**
-     * Bulk update rides
-     */
-    public function bulkUpdateRides(array $rideIds, array $updateData): array
-    {
-        $updated = 0;
-        $failed = 0;
-
-        foreach ($rideIds as $rideId) {
-            try {
-                if ($this->updateRide($rideId, $updateData)) {
-                    $updated++;
-                } else {
-                    $failed++;
-                }
-            } catch (\Exception $e) {
-                Log::error("Bulk update failed for ride {$rideId}: " . $e->getMessage());
-                $failed++;
-            }
-        }
-
-        return [
-            'updated' => $updated,
-            'failed' => $failed,
-            'total' => count($rideIds)
-        ];
-    }
-
-    /**
-     * Export rides
-     */
-    public function exportRides(array $filters = []): array
-    {
-        try {
-            $rides = $this->getAllRides(array_merge($filters, ['limit' => 10000]));
-
-            return array_map(function ($ride) {
-                return [
-                    'ride_id' => $ride['ride_id'] ?? $ride['id'] ?? '',
-                    'driver_firebase_uid' => $ride['driver_firebase_uid'] ?? '',
-                    'passenger_name' => $ride['passenger_name'] ?? '',
-                    'pickup_address' => $ride['pickup_address'] ?? '',
-                    'dropoff_address' => $ride['dropoff_address'] ?? '',
-                    'status' => $ride['status'] ?? '',
-                    'ride_type' => $ride['ride_type'] ?? '',
-                    'estimated_fare' => $ride['estimated_fare'] ?? 0,
-                    'actual_fare' => $ride['actual_fare'] ?? 0,
-                    'distance_km' => $ride['distance_km'] ?? 0,
-                    'duration_minutes' => $ride['duration_minutes'] ?? 0,
-                    'driver_rating' => $ride['driver_rating'] ?? 0,
-                    'passenger_rating' => $ride['passenger_rating'] ?? 0,
-                    'payment_status' => $ride['payment_status'] ?? '',
-                    'created_at' => $ride['created_at'] ?? '',
-                    'completed_at' => $ride['completed_at'] ?? '',
-                    'cancelled_at' => $ride['cancelled_at'] ?? '',
-                    'cancellation_reason' => $ride['cancellation_reason'] ?? ''
-                ];
-            }, $rides);
-        } catch (\Exception $e) {
-            Log::error('Error exporting rides: ' . $e->getMessage());
+            Log::error('DriverRideService: Error getting completed rides for driver: ' . $e->getMessage(), [
+                'driver_uid' => $driverFirebaseUid
+            ]);
             return [];
         }
     }
 
     /**
-     * Get ride timeline/activities
+     * Get rides in date range
      */
-    public function getRideActivities(string $rideId): array
+    public function getRidesInDateRange(string $dateFrom, string $dateTo, array $filters = []): array
     {
         try {
-            $ride = $this->getRideById($rideId);
-            if (!$ride) {
-                return [];
-            }
+            Log::info('DriverRideService: Getting rides in date range', [
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'filters' => $filters
+            ]);
 
-            $activities = [];
+            $filters['date_from'] = $dateFrom;
+            $filters['date_to'] = $dateTo;
 
-            // Create timeline based on ride data
-            if (!empty($ride['created_at'])) {
-                $activities[] = [
-                    'type' => 'ride_requested',
-                    'title' => 'Ride Requested',
-                    'description' => 'Ride was requested by passenger',
-                    'timestamp' => $ride['created_at'],
-                    'status' => 'completed'
-                ];
-            }
-
-            if (!empty($ride['accepted_at'])) {
-                $activities[] = [
-                    'type' => 'ride_accepted',
-                    'title' => 'Ride Accepted',
-                    'description' => 'Driver accepted the ride request',
-                    'timestamp' => $ride['accepted_at'],
-                    'status' => 'completed'
-                ];
-            }
-
-            if (!empty($ride['started_at'])) {
-                $activities[] = [
-                    'type' => 'ride_started',
-                    'title' => 'Ride Started',
-                    'description' => 'Driver started the trip',
-                    'timestamp' => $ride['started_at'],
-                    'status' => 'completed'
-                ];
-            }
-
-            if (!empty($ride['completed_at'])) {
-                $activities[] = [
-                    'type' => 'ride_completed',
-                    'title' => 'Ride Completed',
-                    'description' => 'Trip was completed successfully',
-                    'timestamp' => $ride['completed_at'],
-                    'status' => 'completed'
-                ];
-            }
-
-            if (!empty($ride['cancelled_at'])) {
-                $activities[] = [
-                    'type' => 'ride_cancelled',
-                    'title' => 'Ride Cancelled',
-                    'description' => 'Ride was cancelled: ' . ($ride['cancellation_reason'] ?? 'No reason provided'),
-                    'timestamp' => $ride['cancelled_at'],
-                    'status' => 'cancelled'
-                ];
-            }
-
-            // Sort by timestamp
-            usort($activities, function ($a, $b) {
-                return strtotime($a['timestamp']) - strtotime($b['timestamp']);
-            });
-
-            return $activities;
+            return $this->rideModel->getAllRides($filters);
         } catch (\Exception $e) {
-            Log::error('Error getting ride activities: ' . $e->getMessage());
+            Log::error('DriverRideService: Error getting rides in date range: ' . $e->getMessage(), [
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'filters' => $filters
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Get comprehensive ride statistics
+     */
+    public function getRideStatistics(array $filters = []): array
+    {
+        try {
+            Log::info('DriverRideService: Getting ride statistics', ['filters' => $filters]);
+
+            $cacheKey = 'ride_statistics_' . md5(serialize($filters));
+
+            return Cache::remember($cacheKey, 300, function () use ($filters) {
+                $stats = $this->rideModel->getRideStatistics($filters);
+
+                // Add additional computed statistics
+                $stats['today_rides'] = count($this->getTodayRides());
+                $stats['this_week_rides'] = count($this->getThisWeekRides());
+                $stats['this_month_rides'] = count($this->getThisMonthRides());
+                $stats['average_trip_duration'] = $this->calculateAverageRideDuration($filters);
+                $stats['peak_hours'] = $this->calculatePeakHours($filters);
+
+                return $stats;
+            });
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error getting ride statistics: ' . $e->getMessage());
+            return $this->getDefaultStatistics();
+        }
+    }
+
+    /**
+     * Get driver-specific ride statistics
+     */
+    public function getDriverRideStatistics(string $driverFirebaseUid, array $filters = []): array
+    {
+        try {
+            Log::info('DriverRideService: Getting driver ride statistics', [
+                'driver_uid' => $driverFirebaseUid,
+                'filters' => $filters
+            ]);
+
+            $cacheKey = "driver_ride_stats_{$driverFirebaseUid}_" . md5(serialize($filters));
+
+            return Cache::remember($cacheKey, 300, function () use ($driverFirebaseUid, $filters) {
+                $rides = $this->getDriverRides($driverFirebaseUid, array_merge($filters, ['limit' => 10000]));
+
+                return $this->calculateDriverSpecificStats($rides);
+            });
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error getting driver ride statistics: ' . $e->getMessage(), [
+                'driver_uid' => $driverFirebaseUid
+            ]);
+            return $this->getDefaultStatistics();
+        }
+    }
+
+    /**
+     * Estimate ride fare with dynamic pricing
+     */
+    public function estimateRideFare(array $rideData): array
+    {
+        try {
+            Log::info('DriverRideService: Estimating ride fare', [
+                'distance_km' => $rideData['distance_km'] ?? 0,
+                'duration_minutes' => $rideData['duration_minutes'] ?? 0,
+                'ride_type' => $rideData['ride_type'] ?? 'standard'
+            ]);
+
+            $estimation = $this->calculateFareEstimation($rideData);
+
+            Log::info('DriverRideService: Fare estimation completed', [
+                'estimated_fare' => $estimation['total_fare'],
+                'breakdown' => $estimation
+            ]);
+
+            return $estimation;
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error estimating ride fare: ' . $e->getMessage(), [
+                'ride_data' => $rideData
+            ]);
+            return [
+                'base_fare' => 0,
+                'distance_fare' => 0,
+                'time_fare' => 0,
+                'surge_fare' => 0,
+                'total_fare' => 0,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Get ride summary for dashboard
+     */
+    public function getRideSummaryData(): array
+    {
+        try {
+            Log::info('DriverRideService: Getting ride summary data');
+
+            $cacheKey = 'ride_summary_data';
+
+            return Cache::remember($cacheKey, 60, function () {
+                $today = now()->format('Y-m-d H:i:s');
+                $weekStart = now()->startOfWeek()->format('Y-m-d H:i:s');
+                $monthStart = now()->startOfMonth()->format('Y-m-d H:i:s');
+
+                return [
+                    'today' => [
+                        'total' => count($this->getTodayRides()),
+                        'completed' => count($this->getRidesByStatus(Ride::STATUS_COMPLETED, ['date_from' => $today])),
+                        'in_progress' => count($this->getRidesByStatus(Ride::STATUS_IN_PROGRESS, ['date_from' => $today])),
+                        'cancelled' => count($this->getRidesByStatus(Ride::STATUS_CANCELLED, ['date_from' => $today]))
+                    ],
+                    'this_week' => [
+                        'total' => count($this->getThisWeekRides()),
+                        'completed' => count($this->getRidesByStatus(Ride::STATUS_COMPLETED, ['date_from' => $weekStart])),
+                        'in_progress' => count($this->getRidesByStatus(Ride::STATUS_IN_PROGRESS, ['date_from' => $weekStart])),
+                        'cancelled' => count($this->getRidesByStatus(Ride::STATUS_CANCELLED, ['date_from' => $weekStart]))
+                    ],
+                    'this_month' => [
+                        'total' => count($this->getThisMonthRides()),
+                        'completed' => count($this->getRidesByStatus(Ride::STATUS_COMPLETED, ['date_from' => $monthStart])),
+                        'in_progress' => count($this->getRidesByStatus(Ride::STATUS_IN_PROGRESS, ['date_from' => $monthStart])),
+                        'cancelled' => count($this->getRidesByStatus(Ride::STATUS_CANCELLED, ['date_from' => $monthStart]))
+                    ]
+                ];
+            });
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error getting ride summary data: ' . $e->getMessage());
             return [];
         }
     }
@@ -755,91 +580,435 @@ class DriverRideService
     // ===================== PRIVATE HELPER METHODS =====================
 
     /**
-     * Format ride data for consistent output
+     * Validate ride data
      */
-    private function formatRideData(array $data): array
+    private function validateRideData(array $data): array
     {
-        // Ensure required fields exist with default values
-        $defaults = [
-            'id' => $data['id'] ?? uniqid('ride_'),
-            'ride_id' => $data['ride_id'] ?? $data['id'] ?? uniqid('ride_'),
-            'driver_firebase_uid' => '',
-            'passenger_firebase_uid' => '',
-            'passenger_name' => 'Unknown Passenger',
-            'driver_name' => 'Unknown Driver',
-            'pickup_address' => 'Unknown',
-            'dropoff_address' => 'Unknown',
-            'pickup_latitude' => 0.0,
-            'pickup_longitude' => 0.0,
-            'dropoff_latitude' => 0.0,
-            'dropoff_longitude' => 0.0,
-            'status' => Ride::STATUS_PENDING,
-            'ride_type' => Ride::TYPE_STANDARD,
-            'payment_status' => Ride::PAYMENT_PENDING,
-            'payment_method' => '',
-            'estimated_fare' => 0.00,
-            'actual_fare' => 0.00,
-            'distance_km' => 0.00,
-            'duration_minutes' => 0,
-            'driver_rating' => 0,
-            'passenger_rating' => 0,
-            'created_at' => now()->format('Y-m-d H:i:s'),
-            'updated_at' => now()->format('Y-m-d H:i:s'),
-            'accepted_at' => '',
-            'started_at' => '',
-            'completed_at' => '',
-            'cancelled_at' => '',
-            'cancellation_reason' => '',
-            'cancelled_by' => '',
-            'notes' => '',
-            'special_requests' => '',
-            'passenger_phone' => ''
+        $errors = [];
+
+        $requiredFields = [
+            'driver_firebase_uid' => 'Driver is required',
+            'pickup_address' => 'Pickup address is required',
+            'dropoff_address' => 'Dropoff address is required'
         ];
 
-        $formatted = array_merge($defaults, $data);
+        foreach ($requiredFields as $field => $message) {
+            if (empty($data[$field])) {
+                $errors[] = $message;
+            }
+        }
 
-        // Ensure numeric fields are properly typed
-        $formatted['estimated_fare'] = (float) $formatted['estimated_fare'];
-        $formatted['actual_fare'] = (float) $formatted['actual_fare'];
-        $formatted['distance_km'] = (float) $formatted['distance_km'];
-        $formatted['duration_minutes'] = (int) $formatted['duration_minutes'];
-        $formatted['driver_rating'] = (float) $formatted['driver_rating'];
-        $formatted['passenger_rating'] = (float) $formatted['passenger_rating'];
-        $formatted['pickup_latitude'] = (float) $formatted['pickup_latitude'];
-        $formatted['pickup_longitude'] = (float) $formatted['pickup_longitude'];
-        $formatted['dropoff_latitude'] = (float) $formatted['dropoff_latitude'];
-        $formatted['dropoff_longitude'] = (float) $formatted['dropoff_longitude'];
+        // Validate coordinates if provided
+        if (
+            isset($data['pickup_latitude']) &&
+            ($data['pickup_latitude'] < -90 || $data['pickup_latitude'] > 90)
+        ) {
+            $errors[] = 'Invalid pickup latitude';
+        }
 
-        return $formatted;
+        // Validate fares if provided
+        if (isset($data['estimated_fare']) && $data['estimated_fare'] < 0) {
+            $errors[] = 'Estimated fare cannot be negative';
+        }
+
+        return ['errors' => $errors, 'valid' => empty($errors)];
     }
 
     /**
-     * Prepare ride data before saving
+     * Validate ride update
      */
-    private function prepareRideData(array $data): array
+    private function validateRideUpdate(array $updateData, array $currentRide): array
     {
-        // Set default values
-        $defaults = [
-            'ride_id' => 'RIDE_' . strtoupper(uniqid()),
-            'status' => Ride::STATUS_PENDING,
-            'ride_type' => Ride::TYPE_STANDARD,
-            'payment_status' => Ride::PAYMENT_PENDING,
-            'estimated_fare' => 0.00,
-            'actual_fare' => 0.00,
-            'distance_km' => 0.00,
-            'duration_minutes' => 0,
-            'driver_rating' => 0,
-            'passenger_rating' => 0,
-            'created_at' => now()->format('Y-m-d H:i:s'),
-            'updated_at' => now()->format('Y-m-d H:i:s'),
-            'requested_at' => now()->format('Y-m-d H:i:s'),
-        ];
+        $errors = [];
 
-        return array_merge($defaults, $data);
+        // Check if ride is in a state that allows updates
+        if (in_array($currentRide['status'], [Ride::STATUS_COMPLETED, Ride::STATUS_CANCELLED])) {
+            if (
+                isset($updateData['status']) &&
+                $updateData['status'] !== $currentRide['status']
+            ) {
+                $errors[] = 'Cannot change status of completed or cancelled ride';
+            }
+        }
+
+        return ['errors' => $errors, 'valid' => empty($errors)];
     }
 
     /**
-     * Get default statistics
+     * Check if status transition is valid
+     */
+    private function isValidStatusTransition(string $fromStatus, string $toStatus): bool
+    {
+        $validTransitions = [
+            Ride::STATUS_PENDING => [Ride::STATUS_REQUESTED, Ride::STATUS_CANCELLED],
+            Ride::STATUS_REQUESTED => [Ride::STATUS_ACCEPTED, Ride::STATUS_CANCELLED],
+            Ride::STATUS_ACCEPTED => [Ride::STATUS_DRIVER_ARRIVED, Ride::STATUS_IN_PROGRESS, Ride::STATUS_CANCELLED],
+            Ride::STATUS_DRIVER_ARRIVED => [Ride::STATUS_IN_PROGRESS, Ride::STATUS_CANCELLED],
+            Ride::STATUS_IN_PROGRESS => [Ride::STATUS_COMPLETED, Ride::STATUS_CANCELLED],
+            Ride::STATUS_COMPLETED => [], // No transitions from completed
+            Ride::STATUS_CANCELLED => []  // No transitions from cancelled
+        ];
+
+        return in_array($toStatus, $validTransitions[$fromStatus] ?? []);
+    }
+
+    /**
+     * Add status-specific timestamps
+     */
+    private function addStatusTimestamps(array $updateData, string $status): array
+    {
+        switch ($status) {
+            case Ride::STATUS_REQUESTED:
+                $updateData['requested_at'] = now()->format('Y-m-d H:i:s');
+                break;
+            case Ride::STATUS_ACCEPTED:
+                $updateData['accepted_at'] = now()->format('Y-m-d H:i:s');
+                break;
+            case Ride::STATUS_DRIVER_ARRIVED:
+                $updateData['driver_arrived_at'] = now()->format('Y-m-d H:i:s');
+                break;
+            case Ride::STATUS_IN_PROGRESS:
+                $updateData['started_at'] = now()->format('Y-m-d H:i:s');
+                break;
+            case Ride::STATUS_COMPLETED:
+                $updateData['completed_at'] = now()->format('Y-m-d H:i:s');
+                break;
+            case Ride::STATUS_CANCELLED:
+                $updateData['cancelled_at'] = now()->format('Y-m-d H:i:s');
+                break;
+        }
+
+        return $updateData;
+    }
+
+    /**
+     * Check if ride can be completed
+     */
+    private function canCompleteRide(array $ride): bool
+    {
+        $completableStatuses = [
+            Ride::STATUS_IN_PROGRESS,
+            Ride::STATUS_DRIVER_ARRIVED
+        ];
+
+        return in_array($ride['status'], $completableStatuses);
+    }
+
+    /**
+     * Check if ride can be cancelled
+     */
+    private function canCancelRide(array $ride): bool
+    {
+        $cancellableStatuses = [
+            Ride::STATUS_PENDING,
+            Ride::STATUS_REQUESTED,
+            Ride::STATUS_ACCEPTED,
+            Ride::STATUS_DRIVER_ARRIVED,
+            Ride::STATUS_IN_PROGRESS
+        ];
+
+        return in_array($ride['status'], $cancellableStatuses);
+    }
+
+    /**
+     * Calculate completion data automatically
+     */
+    private function calculateCompletionData(array $currentRide, array $updateData): array
+    {
+        // If actual fare is not provided, use estimated fare
+        if (!isset($updateData['actual_fare']) && isset($currentRide['estimated_fare'])) {
+            $updateData['actual_fare'] = $currentRide['estimated_fare'];
+        }
+
+        // Calculate driver earnings if not provided (80% of fare)
+        if (!isset($updateData['driver_earnings']) && isset($updateData['actual_fare'])) {
+            $updateData['driver_earnings'] = $updateData['actual_fare'] * 0.8;
+            $updateData['commission'] = $updateData['actual_fare'] * 0.2;
+        }
+
+        // Calculate duration if timestamps are available
+        if (
+            !isset($updateData['duration_minutes']) &&
+            isset($currentRide['started_at']) &&
+            isset($updateData['completed_at'])
+        ) {
+            $startTime = Carbon::parse($currentRide['started_at']);
+            $endTime = Carbon::parse($updateData['completed_at']);
+            $updateData['duration_minutes'] = $endTime->diffInMinutes($startTime);
+        }
+
+        return $updateData;
+    }
+
+    /**
+     * Enrich ride data before creation
+     */
+    private function enrichRideData(array $rideData): array
+    {
+        // Add ride ID if not provided
+        if (!isset($rideData['ride_id'])) {
+            $rideData['ride_id'] = 'RIDE_' . strtoupper(uniqid());
+        }
+
+        // Add timestamps
+        $rideData['requested_at'] = now()->format('Y-m-d H:i:s');
+
+        // Estimate fare if not provided
+        if (
+            !isset($rideData['estimated_fare']) &&
+            isset($rideData['distance_km'], $rideData['duration_minutes'])
+        ) {
+            $fareEstimation = $this->estimateRideFare($rideData);
+            $rideData['estimated_fare'] = $fareEstimation['total_fare'];
+        }
+
+        return $rideData;
+    }
+
+    /**
+     * Calculate fare estimation with dynamic pricing
+     */
+    private function calculateFareEstimation(array $rideData): array
+    {
+        $baseFare = 5.00;
+        $perKmRate = 1.50;
+        $perMinuteRate = 0.25;
+
+        // Ride type multipliers
+        $typeMultipliers = [
+            'standard' => 1.0,
+            'premium' => 1.5,
+            'xl' => 1.3,
+            'shared' => 0.8,
+            'delivery' => 0.9
+        ];
+
+        $distanceKm = (float) ($rideData['distance_km'] ?? 0);
+        $durationMinutes = (int) ($rideData['duration_minutes'] ?? 0);
+        $rideType = $rideData['ride_type'] ?? 'standard';
+        $surgeMultiplier = (float) ($rideData['surge_multiplier'] ?? 1.0);
+
+        $typeMultiplier = $typeMultipliers[$rideType] ?? 1.0;
+
+        $distanceFare = $distanceKm * $perKmRate * $typeMultiplier;
+        $timeFare = $durationMinutes * $perMinuteRate * $typeMultiplier;
+        $subtotal = $baseFare + $distanceFare + $timeFare;
+        $surgeFare = ($surgeMultiplier > 1) ? $subtotal * ($surgeMultiplier - 1) : 0;
+        $totalFare = $subtotal + $surgeFare;
+
+        return [
+            'base_fare' => round($baseFare, 2),
+            'distance_fare' => round($distanceFare, 2),
+            'time_fare' => round($timeFare, 2),
+            'type_multiplier' => $typeMultiplier,
+            'surge_multiplier' => $surgeMultiplier,
+            'surge_fare' => round($surgeFare, 2),
+            'subtotal' => round($subtotal, 2),
+            'total_fare' => round($totalFare, 2)
+        ];
+    }
+
+    /**
+     * Calculate driver-specific statistics
+     */
+    private function calculateDriverSpecificStats(array $rides): array
+    {
+        $stats = [
+            'total_rides' => count($rides),
+            'completed_rides' => 0,
+            'cancelled_rides' => 0,
+            'in_progress_rides' => 0,
+            'total_earnings' => 0,
+            'average_rating' => 0,
+            'total_distance' => 0,
+            'total_duration' => 0,
+            'completion_rate' => 0,
+            'cancellation_rate' => 0,
+            'average_earnings_per_ride' => 0
+        ];
+
+        if (empty($rides)) {
+            return $stats;
+        }
+
+        $totalRating = 0;
+        $ratedRides = 0;
+
+        foreach ($rides as $ride) {
+            // Count by status
+            switch ($ride['status']) {
+                case Ride::STATUS_COMPLETED:
+                    $stats['completed_rides']++;
+                    break;
+                case Ride::STATUS_CANCELLED:
+                    $stats['cancelled_rides']++;
+                    break;
+                case Ride::STATUS_IN_PROGRESS:
+                case Ride::STATUS_ACCEPTED:
+                case Ride::STATUS_DRIVER_ARRIVED:
+                    $stats['in_progress_rides']++;
+                    break;
+            }
+
+            // Sum earnings and other metrics
+            if (isset($ride['driver_earnings'])) {
+                $stats['total_earnings'] += (float) $ride['driver_earnings'];
+            } elseif (isset($ride['actual_fare'])) {
+                $stats['total_earnings'] += (float) $ride['actual_fare'] * 0.8; // 80% to driver
+            }
+
+            if (isset($ride['distance_km'])) {
+                $stats['total_distance'] += (float) $ride['distance_km'];
+            }
+
+            if (isset($ride['duration_minutes'])) {
+                $stats['total_duration'] += (int) $ride['duration_minutes'];
+            }
+
+            if (isset($ride['driver_rating']) && $ride['driver_rating'] > 0) {
+                $totalRating += (float) $ride['driver_rating'];
+                $ratedRides++;
+            }
+        }
+
+        // Calculate rates and averages
+        if ($stats['total_rides'] > 0) {
+            $stats['completion_rate'] = round(($stats['completed_rides'] / $stats['total_rides']) * 100, 2);
+            $stats['cancellation_rate'] = round(($stats['cancelled_rides'] / $stats['total_rides']) * 100, 2);
+        }
+
+        if ($ratedRides > 0) {
+            $stats['average_rating'] = round($totalRating / $ratedRides, 2);
+        }
+
+        if ($stats['completed_rides'] > 0) {
+            $stats['average_earnings_per_ride'] = round($stats['total_earnings'] / $stats['completed_rides'], 2);
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Get today's rides
+     */
+    private function getTodayRides(): array
+    {
+        return $this->getRidesInDateRange(
+            now()->startOfDay()->format('Y-m-d H:i:s'),
+            now()->endOfDay()->format('Y-m-d H:i:s')
+        );
+    }
+
+    /**
+     * Get this week's rides
+     */
+    private function getThisWeekRides(): array
+    {
+        return $this->getRidesInDateRange(
+            now()->startOfWeek()->format('Y-m-d H:i:s'),
+            now()->endOfWeek()->format('Y-m-d H:i:s')
+        );
+    }
+
+    /**
+     * Get this month's rides
+     */
+    private function getThisMonthRides(): array
+    {
+        return $this->getRidesInDateRange(
+            now()->startOfMonth()->format('Y-m-d H:i:s'),
+            now()->endOfMonth()->format('Y-m-d H:i:s')
+        );
+    }
+
+    /**
+     * Calculate average ride duration
+     */
+    private function calculateAverageRideDuration(array $filters): float
+    {
+        $rides = $this->getAllRides(array_merge($filters, ['limit' => 1000]));
+        $completedRides = array_filter($rides, function ($ride) {
+            return $ride['status'] === Ride::STATUS_COMPLETED &&
+                isset($ride['duration_minutes']) &&
+                $ride['duration_minutes'] > 0;
+        });
+
+        if (empty($completedRides)) {
+            return 0;
+        }
+
+        $totalDuration = array_sum(array_column($completedRides, 'duration_minutes'));
+        return round($totalDuration / count($completedRides), 2);
+    }
+
+    /**
+     * Calculate peak hours
+     */
+    private function calculatePeakHours(array $filters): array
+    {
+        $rides = $this->getAllRides(array_merge($filters, ['limit' => 1000]));
+        $hourCounts = [];
+
+        foreach ($rides as $ride) {
+            if (isset($ride['created_at'])) {
+                $hour = Carbon::parse($ride['created_at'])->format('H');
+                $hourCounts[$hour] = ($hourCounts[$hour] ?? 0) + 1;
+            }
+        }
+
+        arsort($hourCounts);
+        return array_slice($hourCounts, 0, 3, true);
+    }
+
+    /**
+     * Handle ride completion events
+     */
+    private function handleRideCompletion(string $rideId, array $currentRide, array $completionData): void
+    {
+        try {
+            Log::info('DriverRideService: Ride completion handled', [
+                'ride_id' => $rideId,
+                'driver_uid' => $currentRide['driver_firebase_uid']
+            ]);
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error handling ride completion: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Handle ride cancellation events
+     */
+    private function handleRideCancellation(string $rideId, array $currentRide, array $cancellationData): void
+    {
+        try {
+            Log::info('DriverRideService: Ride cancellation handled', [
+                'ride_id' => $rideId,
+                'cancelled_by' => $cancellationData['cancelled_by']
+            ]);
+        } catch (\Exception $e) {
+            Log::error('DriverRideService: Error handling ride cancellation: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Clear ride-specific caches
+     */
+    private function clearRideCaches(string $rideId): void
+    {
+        Cache::forget("ride_{$rideId}");
+        $this->clearRidesCaches();
+    }
+
+    /**
+     * Clear general rides caches
+     */
+    private function clearRidesCaches(): void
+    {
+        Cache::flush(); // Simplified cache clearing
+    }
+
+    /**
+     * Get default statistics structure
      */
     private function getDefaultStatistics(): array
     {
@@ -854,31 +1023,11 @@ class DriverRideService
             'total_distance' => 0,
             'total_duration' => 0,
             'completion_rate' => 0,
-            'cancellation_rate' => 0
+            'cancellation_rate' => 0,
+            'average_earnings_per_ride' => 0,
+            'today_rides' => 0,
+            'this_week_rides' => 0,
+            'this_month_rides' => 0
         ];
-    }
-
-    /**
-     * Clear ride cache
-     */
-    public function clearRideCache(): void
-    {
-        Cache::forget('ride_statistics');
-        Cache::forget('ride_summary_data');
-    }
-
-    /**
-     * Test connection to Firestore
-     */
-    public function testConnection(): array
-    {
-        try {
-            return $this->firestoreService->healthCheck();
-        } catch (\Exception $e) {
-            return [
-                'status' => 'error',
-                'message' => $e->getMessage()
-            ];
-        }
     }
 }

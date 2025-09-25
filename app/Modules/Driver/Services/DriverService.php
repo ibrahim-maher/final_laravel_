@@ -35,7 +35,7 @@ class DriverService
             if (!$driver) {
                 return [];
             }
-
+            
             return $driver->getActiveRides();
         } catch (\Exception $e) {
             Log::error('Error getting active rides: ' . $e->getMessage());
@@ -396,9 +396,10 @@ class DriverService
             }
 
             return $statistics;
+
         } catch (\Exception $e) {
             Log::error('Error in getDriverStatistics: ' . $e->getMessage());
-
+            
             // Return safe defaults
             return [
                 'total_drivers' => 0,
@@ -582,9 +583,10 @@ class DriverService
             }
 
             return $analytics;
+
         } catch (\Exception $e) {
             Log::error('Error in getSystemAnalytics: ' . $e->getMessage());
-
+            
             // Return safe default analytics
             return [
                 'driver_statistics' => [],
@@ -626,13 +628,14 @@ class DriverService
 
                 // Get recent rides for additional metrics
                 $recentRides = $driver->getRides(['limit' => 100]);
-                $last30DaysRides = array_filter($recentRides, function ($ride) {
-                    return isset($ride['created_at']) &&
-                        strtotime($ride['created_at']) >= strtotime('-30 days');
+                $last30DaysRides = array_filter($recentRides, function($ride) {
+                    return isset($ride['created_at']) && 
+                           strtotime($ride['created_at']) >= strtotime('-30 days');
                 });
 
                 $metrics['rides_last_30_days'] = count($last30DaysRides);
                 $metrics['earnings_last_30_days'] = array_sum(array_column($last30DaysRides, 'actual_fare'));
+
             } catch (\Exception $e) {
                 Log::warning('Error getting detailed ride metrics: ' . $e->getMessage());
                 $metrics['rides_last_30_days'] = 0;
@@ -640,6 +643,7 @@ class DriverService
             }
 
             return $metrics;
+
         } catch (\Exception $e) {
             Log::error('Error getting driver performance metrics: ' . $e->getMessage());
             return null;
@@ -725,7 +729,7 @@ class DriverService
 
         return true;
     }
-    public function getDriverProfileCompletion($firebaseUid)
+     public function getDriverProfileCompletion($firebaseUid)
     {
         $driver = $this->getDriverById($firebaseUid);
 
@@ -755,7 +759,7 @@ class DriverService
 
         return round(($completedFields / count($requiredFields)) * 100);
     }
-    public function getDriverRideStatistics($firebaseUid)
+ public function getDriverRideStatistics($firebaseUid)
     {
         $driver = $this->getDriverById($firebaseUid);
 
